@@ -103,6 +103,7 @@ list row:hover:not(:selected) { background-color: #1e1e21; }
 .bubble.in.tail { border-bottom-left-radius: 5px; }
 .bubble.out.tail { border-bottom-right-radius: 5px; }
 .bubble.failed { background-color: rgba(10, 132, 255, 0.45); }
+.bubble.attachment { padding: 9px 14px; }
 .bubble selection { background-color: rgba(255, 255, 255, 0.35); }
 .timestamp { color: #8e8e93; font-size: 11px; font-weight: 600; margin: 12px 0 6px 0; }
 .receipt { color: #8e8e93; font-size: 11px; margin: 2px 4px 0 4px; }
@@ -248,9 +249,44 @@ def chat_time(ts):
 REPLY_RE = re.compile(r'^reply:\s*["“](.*?)["”]\s*\n(.+)$', re.S | re.I)
 
 
+# The iPhone doesn't share pictures over Bluetooth; it sends the text "Attachment: 1 Image" instead
+ATTACHMENT_RE = re.compile(r"^[ \t]*Attachments?:[ \t]*(.+?)[ \t]*$", re.I | re.M)
+ATTACHMENT_KINDS = {  # word the iPhone uses: (emoji, one, many)
+    "image": ("📷", "Photo", "Photos"),
+    "photo": ("📷", "Photo", "Photos"),
+    "video": ("🎥", "Video", "Videos"),
+    "audio": ("🎤", "Audio message", "Audio messages"),
+    "audio message": ("🎤", "Audio message", "Audio messages"),
+    "contact": ("👤", "Contact card", "Contact cards"),
+    "location": ("📍", "Location", "Locations"),
+}
+
+
+def split_attachments(text):
+    """(text without attachment lines, [(emoji, description)]) for a message."""
+    found = []
+    for spec in ATTACHMENT_RE.findall(text):
+        for part in re.split(r",|\band\b", spec):
+            m = re.match(r"\s*(\d+)\s+([A-Za-z ]+?)s?\s*$", part)
+            if not m:
+                continue
+            count, kind = int(m.group(1)), m.group(2).lower()
+            emoji, one, many = ATTACHMENT_KINDS.get(kind, ("📎", "Attachment", "Attachments"))
+            found.append((emoji, one if count == 1 else "%d %s" % (count, many)))
+    if not found:
+        return text, []
+    return ATTACHMENT_RE.sub("", text).strip(), found
+
+
+def plain_text(text):
+    """A message as one line of text, with attachments as e.g. "📷 Photo"."""
+    rest, attachments = split_attachments(text)
+    return " ".join([rest] + ["%s %s" % a for a in attachments]).strip()
+
+
 def snippet(text, length=40):
     """One-line start of a message, used when quoting it in a reply."""
-    line = " ".join(text.split())
+    line = " ".join(plain_text(text).split())
     return line if len(line) <= length else line[:length - 1].rstrip() + "…"
 
 
@@ -602,7 +638,7 @@ class Window(Gtk.ApplicationWindow):
             row.address = c["address"]
             row.display = c["name"] or c["address"]
             found = REPLY_RE.match(c["text"])
-            row.preview = (found.group(2) if found else c["text"]).replace("\n", " ")
+            row.preview = plain_text(found.group(2) if found else c["text"]).replace("\n", " ")
             box = Gtk.Box(spacing=10, margin_start=4, margin_end=8, margin_top=10, margin_bottom=10)
             dot = Gtk.Box(valign=Gtk.Align.CENTER, halign=Gtk.Align.CENTER)
             dot.get_style_context().add_class("unread-dot")
@@ -785,17 +821,35 @@ class Window(Gtk.ApplicationWindow):
                               ellipsize=Pango.EllipsizeMode.END, max_width_chars=40)
             quote.get_style_context().add_class("reply-quote")
             wrapper.pack_start(quote, False, False, 0)
-        label = Gtk.Label(label=text, wrap=True, wrap_mode=Pango.WrapMode.WORD_CHAR,
-                          selectable=True, xalign=0, max_width_chars=48, halign=align)
-        label.set_can_focus(False)
-        label.connect("populate-popup", self.on_bubble_menu, m["id"])
-        ctx = label.get_style_context()
-        ctx.add_class("bubble")
-        ctx.add_class("out" if outgoing else "in")
+        text, attachments = split_attachments(text)
+        pieces = []
+        if text or not attachments:
+            pieces.append(Gtk.Label(label=text))
+        for emoji, what in attachments:
+            card = Gtk.Label()
+            card.set_markup('<span size="x-large">%s</span>  <b>%s</b>\n'
+                            '<span size="small" alpha="65%%">Open on your iPhone to view</span>'
+                            % (emoji, GLib.markup_escape_text(what)))
+            card.get_style_context().add_class("attachment")
+            pieces.append(card)
+        for piece in pieces:
+            piece.set_properties(wrap=True, wrap_mode=Pango.WrapMode.WORD_CHAR, selectable=True,
+                                 xalign=0, max_width_chars=48, halign=align)
+            piece.set_can_focus(False)
+            piece.connect("populate-popup", self.on_bubble_menu, m["id"])
+            ctx = piece.get_style_context()
+            ctx.add_class("bubble")
+            ctx.add_class("out" if outgoing else "in")
+            if m["status"] == "failed":
+                ctx.add_class("failed")
         if ends_group:
-            ctx.add_class("tail")
-        if m["status"] == "failed":
-            ctx.add_class("failed")
+            pieces[-1].get_style_context().add_class("tail")
+        if len(pieces) == 1:
+            label = pieces[0]
+        else:  # text and attachment cards stack like separate bubbles
+            label = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2, halign=align)
+            for piece in pieces:
+                label.pack_start(piece, False, False, 0)
         if reacts:
             # badge sits on the bubble's top corner, like a tapback on the iPhone
             overlay = Gtk.Overlay(halign=align)
@@ -1066,7 +1120,7 @@ class App(Gtk.Application):
         if not m["outgoing"] and recent and not viewing:
             title = self.store.contact_name(m["address"]) or m["name"] or m["address"]
             icon = self.store.contact_photo(m["address"]) or "mail-message-new"
-            note = Notify.Notification.new(title, m["text"], icon)
+            note = Notify.Notification.new(title, plain_text(m["text"]), icon)
             note.add_action("default", "Open", self.on_notification_clicked, conv)
             note.connect("closed", lambda n: self.notifications.remove(n))
             self.notifications.append(note)

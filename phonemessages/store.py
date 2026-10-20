@@ -37,6 +37,8 @@ class Store:
             )""")
         self.db.execute("CREATE INDEX IF NOT EXISTS messages_conv ON messages(conv, ts)")
         self.db.execute("CREATE TABLE IF NOT EXISTS contacts (key TEXT PRIMARY KEY, name TEXT NOT NULL)")
+        # phone messages the user deleted, so they aren't fetched again when the iPhone relists them
+        self.db.execute("CREATE TABLE IF NOT EXISTS deleted (handle TEXT NOT NULL, ts REAL NOT NULL)")
         columns = [r["name"] for r in self.db.execute("PRAGMA table_info(messages)")]
         if "reply_to" not in columns:  # databases from before replies existed
             self.db.execute("ALTER TABLE messages ADD COLUMN reply_to INTEGER")
@@ -59,7 +61,9 @@ class Store:
 
     def has_handle(self, handle, ts):
         row = self.db.execute(
-            "SELECT 1 FROM messages WHERE handle = ? AND abs(ts - ?) < 1", (handle, ts or 0)
+            "SELECT 1 FROM messages WHERE handle = ? AND abs(ts - ?) < 1 UNION ALL "
+            "SELECT 1 FROM deleted WHERE handle = ? AND abs(ts - ?) < 1",
+            (handle, ts or 0, handle, ts or 0)
         ).fetchone()
         return row is not None
 
@@ -113,8 +117,16 @@ class Store:
         return cur.rowcount > 0
 
     def delete_conversation(self, conv):
+        self._delete("conv = ?", (conv,))
+
+    def delete_message(self, msg_id):
+        self._delete("id = ?", (msg_id,))
+
+    def _delete(self, where, args):
         with self.db:
-            self.db.execute("DELETE FROM messages WHERE conv = ?", (conv,))
+            self.db.execute("INSERT INTO deleted (handle, ts) SELECT handle, ts FROM messages "
+                            "WHERE handle IS NOT NULL AND " + where, args)
+            self.db.execute("DELETE FROM messages WHERE " + where, args)
 
     def messages(self, conv):
         return self.db.execute(

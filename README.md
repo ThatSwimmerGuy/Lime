@@ -129,7 +129,9 @@ These come from how the iPhone shares messages over Bluetooth, not from Lime:
 - **No old history.** The iPhone only shares messages that arrive while it's connected. Lime
   keeps everything it receives from then on.
 - **Messages you send from the phone itself** may not appear in Lime.
-- **Text only.** No photos or attachments.
+- **No photos or attachments.** The iPhone doesn't send pictures over Bluetooth, only the text
+  "Attachment: 1 Image". Lime shows this as a 📷 Photo card so you know to check your phone.
+  Sending pictures isn't possible either.
 - **Reactions are sent as text.** Bluetooth can't send real iMessage tapbacks, so a reaction
   arrives as a line such as `Loved "How was your day?"`. Lime shows incoming ones as badges.
 - **Group chats.** Replies go to the person, not the group.
