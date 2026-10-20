@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2c2c2f"/>
+      <stop offset="1" stop-color="#161618"/>
+    </linearGradient>
+    <radialGradient id="flesh" cx="0.5" cy="0.45" r="0.6">
+      <stop offset="0" stop-color="#d4f77a"/>
+      <stop offset="1" stop-color="#9ad83a"/>
+    </radialGradient>
+  </defs>
+  <rect x="4" y="4" width="120" height="120" rx="28" fill="url(#bg)"/>
+  <!-- lime slice that doubles as a speech bubble: rind, tail, pith, flesh, segments -->
+  <circle cx="64" cy="60" r="40" fill="#4f9e1a"/>
+  <path fill="#4f9e1a" d="M36 86 L26 106 L52 94 Z"/>
+  <circle cx="64" cy="60" r="35" fill="#eaf8cf"/>
+  <circle cx="64" cy="60" r="32" fill="url(#flesh)"/>
+  <g stroke="#eaf8cf" stroke-width="3" stroke-linecap="round">
+    <line x1="64" y1="60" x2="92.6" y2="71.9"/>
+    <line x1="64" y1="60" x2="75.9" y2="88.6"/>
+    <line x1="64" y1="60" x2="52.1" y2="88.6"/>
+    <line x1="64" y1="60" x2="35.4" y2="71.9"/>
+    <line x1="64" y1="60" x2="35.4" y2="48.1"/>
+    <line x1="64" y1="60" x2="52.1" y2="31.4"/>
+    <line x1="64" y1="60" x2="75.9" y2="31.4"/>
+    <line x1="64" y1="60" x2="92.6" y2="48.1"/>
+  </g>
+  <circle cx="64" cy="60" r="3.5" fill="#eaf8cf"/>
+</svg>
