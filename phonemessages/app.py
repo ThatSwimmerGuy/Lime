@@ -80,10 +80,26 @@ list row:hover:not(:selected) { background-color: #1e1e21; }
 .conv-time, .conv-preview { color: #8e8e93; font-size: 13px; }
 .contact-letter { color: #8e8e93; font-size: 13px; font-weight: 700; margin: 10px 18px 2px 18px; }
 
-/* settings popover, laid out like macOS System Settings: grouped rounded cards */
-popover.settings-popover { background-color: #1c1c1e; border: 1px solid rgba(255, 255, 255, 0.1);
-                           border-radius: 12px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5); }
-.settings-title { font-size: 15px; font-weight: 700; margin: 0 2px 4px 2px; }
+/* Settings window, laid out like macOS Settings: icon tabs in the toolbar, grouped cards below */
+.settings-window { background-color: @app_bg; }
+.settings-header { border-bottom: none; min-height: 38px; }
+.settings-tab-bar { background-color: @app_bg; border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+                    padding: 0 0 8px 0; }
+.settings-tabs button { background-image: none; background-color: transparent; border: none; box-shadow: none;
+                        border-radius: 7px; padding: 5px 10px 4px 10px; min-width: 62px; color: #a1a1a6; }
+.settings-tabs button:hover { background-color: rgba(255, 255, 255, 0.05); }
+.settings-tabs button:checked { background-color: rgba(255, 255, 255, 0.10); color: #ffffff; }
+.settings-tabs button:checked image { color: #0a84ff; }
+.settings-tab-label { font-size: 11px; }
+.settings-value { color: #8e8e93; font-size: 13px; }
+.settings-footnote { color: #8e8e93; font-size: 11px; margin: 2px 10px 0 10px; }
+/* macOS-style switch: grey track, blue when on, round white knob */
+.settings-window switch { background-image: none; background-color: rgba(120, 120, 128, 0.36); border: none;
+                          border-radius: 999px; min-width: 36px; min-height: 20px; box-shadow: none; color: transparent; }
+.settings-window switch:checked { background-color: #0a84ff; }
+.settings-window switch slider { background-image: none; background-color: #ffffff; border: none; border-radius: 999px;
+                                 min-width: 18px; min-height: 18px; margin: 1px; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.35); }
+.settings-window switch image { color: transparent; }
 .settings-section { color: #8e8e93; font-size: 11px; font-weight: 600; margin: 6px 10px 0 10px; }
 .settings-group { background-color: @raised_bg; border-radius: 10px; border: 1px solid rgba(255, 255, 255, 0.05); }
 .settings-row { min-height: 38px; padding: 0 10px 0 12px; }
@@ -91,7 +107,8 @@ popover.settings-popover { background-color: #1c1c1e; border: 1px solid rgba(255
 .settings-sep { background-color: rgba(255, 255, 255, 0.07); min-height: 1px; margin-left: 12px; }
 button.swatch { padding: 0; min-width: 20px; min-height: 20px; border-radius: 999px; background-image: none;
                 background-color: transparent; border: 1px solid rgba(255, 255, 255, 0.25); box-shadow: none; }
-button.swatch colorswatch { border-radius: 999px; min-width: 20px; min-height: 20px; }
+button.swatch colorswatch, button.swatch colorswatch overlay { border-radius: 999px; min-width: 20px; min-height: 20px; }
+.settings-window button.swatch colorswatch, .settings-window button.swatch colorswatch overlay { border-radius: 999px; }
 button.link-btn { background-image: none; background-color: transparent; border: none; box-shadow: none;
                   color: #0a84ff; font-size: 12px; padding: 2px 6px; min-height: 0; }
 button.link-btn:hover { color: #409cff; }
@@ -396,10 +413,11 @@ class Window(Gtk.ApplicationWindow):
         new_btn.set_tooltip_text("New message")
         new_btn.connect("clicked", self.on_new_clicked)
         header.pack_end(new_btn)
-        settings_btn = Gtk.MenuButton(popover=self.build_settings_popover())
-        settings_btn.add(Gtk.Image.new_from_icon_name("emblem-system-symbolic", Gtk.IconSize.BUTTON))
-        settings_btn.set_tooltip_text("Settings")
+        settings_btn = Gtk.Button.new_from_icon_name("emblem-system-symbolic", Gtk.IconSize.BUTTON)
+        settings_btn.set_tooltip_text("Settings (Ctrl+,)")
+        settings_btn.connect("clicked", lambda b: self.open_settings())
         header.pack_end(settings_btn)
+        self.settings_window = None
 
         outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         self.add(outer)
@@ -498,70 +516,16 @@ class Window(Gtk.ApplicationWindow):
 
     # -- devices / connection ---------------------------------------------
 
-    def build_settings_popover(self):
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin=14)
-        box.set_size_request(280, -1)
-        title = Gtk.Label(label="Settings", xalign=0)
-        title.get_style_context().add_class("settings-title")
-        box.pack_start(title, False, False, 0)
+    def open_settings(self):
+        if not self.settings_window:
+            self.settings_window = SettingsWindow(self)
+            self.settings_window.connect("destroy", lambda w: setattr(self, "settings_window", None))
+        self.settings_window.present()
 
-        self.color_buttons = {}
-        saved = self.cfg.get("bubble_colors", {})
-        rows = []
-        for key, text, default in BUBBLE_COLORS:
-            rgba = Gdk.RGBA()
-            rgba.parse(saved.get(key, default))
-            btn = Gtk.ColorButton(rgba=rgba, title=text, valign=Gtk.Align.CENTER)
-            btn.get_style_context().add_class("swatch")
-            btn.get_child().set_size_request(20, 20)  # the swatch is wider than tall by default
-            btn.connect("color-set", self.on_bubble_color_set, key)
-            self.color_buttons[key] = btn
-            rows.append((text, btn))
-        box.pack_start(settings_section("Bubble Colours"), False, False, 0)
-        box.pack_start(settings_group(rows), False, False, 0)
-        reset = Gtk.Button(label="Reset to Defaults", halign=Gtk.Align.END)
-        reset.get_style_context().add_class("link-btn")
-        reset.connect("clicked", self.on_bubble_colors_reset)
-        box.pack_start(reset, False, False, 0)
-
-        # Left / Right as a segmented control, like a macOS picker
-        segmented = Gtk.Box(valign=Gtk.Align.CENTER)
-        segmented.get_style_context().add_class("segmented")
-        current = self.cfg.get("window_buttons", "left")
-        group = None
-        for side, label in (("left", "Left"), ("right", "Right")):
-            btn = Gtk.RadioButton(label=label, group=group, draw_indicator=False)
-            group = group or btn
-            btn.set_active(side == current)
-            btn.connect("toggled", lambda b, s=side: b.get_active() and self.on_window_buttons_changed(s))
-            segmented.pack_start(btn, False, False, 0)
-        box.pack_start(settings_section("Window Buttons"), False, False, 0)
-        box.pack_start(settings_group([("Position", segmented)]), False, False, 0)
-
-        box.show_all()
-        popover = Gtk.Popover()
-        popover.get_style_context().add_class("settings-popover")
-        popover.add(box)
-        return popover
-
-    def on_window_buttons_changed(self, side):
+    def set_window_buttons(self, side):
         self.cfg["window_buttons"] = side
         save_config(self.cfg)
         self.header.set_decoration_layout(WINDOW_BUTTON_LAYOUTS[side])
-
-    def on_bubble_color_set(self, btn, key):
-        self.cfg.setdefault("bubble_colors", {})[key] = btn.get_rgba().to_string()
-        save_config(self.cfg)
-        self.get_application().apply_bubble_colors(self.cfg["bubble_colors"])
-
-    def on_bubble_colors_reset(self, btn):
-        self.cfg.pop("bubble_colors", None)
-        save_config(self.cfg)
-        for key, _, default in BUBBLE_COLORS:
-            rgba = Gdk.RGBA()
-            rgba.parse(default)
-            self.color_buttons[key].set_rgba(rgba)
-        self.get_application().apply_bubble_colors({})
 
     def load_devices(self):
         self.device_combo.remove_all()
@@ -1103,6 +1067,172 @@ class Window(Gtk.ApplicationWindow):
         return False
 
 
+class SettingsWindow(Gtk.Window):
+    """macOS-style Settings window: a toolbar of icon tabs above grouped cards."""
+
+    # tab id, label, icon names (first one the icon theme has wins)
+    TABS = [
+        ("general", "General", ["preferences-system-symbolic", "emblem-system-symbolic"]),
+        ("appearance", "Appearance", ["preferences-desktop-color-symbolic",
+                                      "applications-graphics-symbolic", "color-select-symbolic"]),
+    ]
+
+    def __init__(self, main):
+        super().__init__(title="Settings", transient_for=main, destroy_with_parent=True, resizable=False)
+        self.main = main
+        self.cfg = main.cfg  # shared with the main window, so neither overwrites the other's changes
+        self.get_style_context().add_class("settings-window")
+        self.set_default_size(460, -1)
+
+        self.header = Gtk.HeaderBar(show_close_button=True)
+        self.header.get_style_context().add_class("settings-header")
+        self.set_titlebar(self.header)
+        self.apply_window_buttons()
+
+        outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        self.add(outer)
+        tabs = Gtk.Box(spacing=4, halign=Gtk.Align.CENTER)
+        tabs.get_style_context().add_class("settings-tabs")
+        tab_bar = Gtk.Box()
+        tab_bar.get_style_context().add_class("settings-tab-bar")
+        tab_bar.set_center_widget(tabs)
+        outer.pack_start(tab_bar, False, False, 0)
+
+        # the window shrinks or grows to each page's height, like macOS Settings
+        self.stack = Gtk.Stack(transition_type=Gtk.StackTransitionType.CROSSFADE, transition_duration=150,
+                               interpolate_size=True, vhomogeneous=False)
+        outer.pack_start(self.stack, True, True, 0)
+        self.stack.add_named(self.build_general(), "general")
+        self.stack.add_named(self.build_appearance(), "appearance")
+
+        group = None
+        self.tab_buttons = {}
+        for tab_id, label, icons in self.TABS:
+            btn = Gtk.RadioButton(group=group, draw_indicator=False)
+            self.tab_buttons[tab_id] = btn
+            group = group or btn
+            content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+            image = Gtk.Image.new_from_gicon(Gio.ThemedIcon.new_from_names(icons), Gtk.IconSize.LARGE_TOOLBAR)
+            image.set_pixel_size(22)
+            text = Gtk.Label(label=label)
+            text.get_style_context().add_class("settings-tab-label")
+            content.pack_start(image, False, False, 0)
+            content.pack_start(text, False, False, 0)
+            btn.add(content)
+            btn.connect("toggled", lambda b, t=tab_id, n=label: b.get_active() and self.show_tab(t, n))
+            tabs.pack_start(btn, False, False, 0)
+        self.connect("notify::is-active", lambda w, p: self.is_active() and self.refresh())
+        self.show_all()
+        self.show_tab("general", "General")  # after show_all: a Stack can only switch to visible pages
+
+    def select_tab(self, tab_id):
+        """Switch tabs from code; the button's toggled handler shows the page."""
+        self.tab_buttons[tab_id].set_active(True)
+
+    def show_tab(self, tab_id, label):
+        self.stack.set_visible_child_name(tab_id)
+        self.header.set_title(label)  # macOS titles the window after the open tab
+
+    def apply_window_buttons(self):
+        # only a close button, on the side the user chose (Settings windows don't maximise)
+        self.header.set_decoration_layout("close:" if self.cfg.get("window_buttons", "left") == "left" else ":close")
+
+    @staticmethod
+    def page():
+        return Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_start=20, margin_end=20,
+                       margin_top=16, margin_bottom=20)
+
+    # -- General -------------------------------------------------------------
+
+    def build_general(self):
+        box = self.page()
+        self.phone_label = Gtk.Label()
+        self.phone_label.get_style_context().add_class("settings-value")
+        self.auto_switch = Gtk.Switch(valign=Gtk.Align.CENTER)
+        self.auto_switch.connect("notify::active", self.on_auto_connect_changed)
+        box.pack_start(settings_section("iPhone"), False, False, 0)
+        box.pack_start(settings_group([("Paired iPhone", self.phone_label),
+                                       ("Connect Automatically", self.auto_switch)]), False, False, 0)
+        note = Gtk.Label(label="Lime reconnects on its own when your iPhone comes back in range, "
+                               "and keeps running in the background so you still get notifications.",
+                         xalign=0, wrap=True, max_width_chars=50)
+        note.get_style_context().add_class("settings-footnote")
+        box.pack_start(note, False, False, 0)
+        self.refresh()
+        return box
+
+    def refresh(self):
+        """Show the current device and auto-connect state; Connect/Disconnect can change them."""
+        name = self.main.device_combo.get_active_text() if self.main.device_combo.get_active_id() else None
+        self.phone_label.set_text(name or "None")
+        self.auto_switch.handler_block_by_func(self.on_auto_connect_changed)
+        self.auto_switch.set_active(bool(self.cfg.get("auto_connect")))
+        self.auto_switch.handler_unblock_by_func(self.on_auto_connect_changed)
+
+    def on_auto_connect_changed(self, switch, pspec):
+        self.cfg["auto_connect"] = switch.get_active()
+        address = self.main.device_combo.get_active_id()
+        if address:  # the background reconnect needs to know which phone
+            self.cfg["device"] = address
+        save_config(self.cfg)
+
+    # -- Appearance ----------------------------------------------------------
+
+    def build_appearance(self):
+        box = self.page()
+        self.color_buttons = {}
+        saved = self.cfg.get("bubble_colors", {})
+        rows = []
+        for key, text, default in BUBBLE_COLORS:
+            rgba = Gdk.RGBA()
+            rgba.parse(saved.get(key, default))
+            btn = Gtk.ColorButton(rgba=rgba, title=text, valign=Gtk.Align.CENTER)
+            btn.get_style_context().add_class("swatch")
+            btn.get_child().set_size_request(20, 20)  # the swatch is wider than tall by default
+            btn.connect("color-set", self.on_bubble_color_set, key)
+            self.color_buttons[key] = btn
+            rows.append((text, btn))
+        box.pack_start(settings_section("Bubble Colours"), False, False, 0)
+        box.pack_start(settings_group(rows), False, False, 0)
+        reset = Gtk.Button(label="Reset to Defaults", halign=Gtk.Align.END)
+        reset.get_style_context().add_class("link-btn")
+        reset.connect("clicked", self.on_bubble_colors_reset)
+        box.pack_start(reset, False, False, 0)
+
+        # Left / Right as a segmented control, like a macOS picker
+        segmented = Gtk.Box(valign=Gtk.Align.CENTER)
+        segmented.get_style_context().add_class("segmented")
+        current = self.cfg.get("window_buttons", "left")
+        group = None
+        for side, label in (("left", "Left"), ("right", "Right")):
+            btn = Gtk.RadioButton(label=label, group=group, draw_indicator=False)
+            group = group or btn
+            btn.set_active(side == current)
+            btn.connect("toggled", lambda b, s=side: b.get_active() and self.on_window_buttons_changed(s))
+            segmented.pack_start(btn, False, False, 0)
+        box.pack_start(settings_section("Window Buttons"), False, False, 0)
+        box.pack_start(settings_group([("Position", segmented)]), False, False, 0)
+        return box
+
+    def on_window_buttons_changed(self, side):
+        self.main.set_window_buttons(side)
+        self.apply_window_buttons()
+
+    def on_bubble_color_set(self, btn, key):
+        self.cfg.setdefault("bubble_colors", {})[key] = btn.get_rgba().to_string()
+        save_config(self.cfg)
+        self.main.get_application().apply_bubble_colors(self.cfg["bubble_colors"])
+
+    def on_bubble_colors_reset(self, btn):
+        self.cfg.pop("bubble_colors", None)
+        save_config(self.cfg)
+        for key, _, default in BUBBLE_COLORS:
+            rgba = Gdk.RGBA()
+            rgba.parse(default)
+            self.color_buttons[key].set_rgba(rgba)
+        self.main.get_application().apply_bubble_colors({})
+
+
 class App(Gtk.Application):
     def __init__(self):
         super().__init__(application_id=APP_ID, flags=Gio.ApplicationFlags.DEFAULT_FLAGS)
@@ -1222,4 +1352,8 @@ def main():
     quit_action.connect("activate", lambda *a: app.quit())
     app.add_action(quit_action)
     app.set_accels_for_action("app.quit", ["<Control>q"])
+    settings_action = Gio.SimpleAction.new("settings", None)
+    settings_action.connect("activate", lambda *a: (app.activate(), app.window.open_settings()))
+    app.add_action(settings_action)
+    app.set_accels_for_action("app.settings", ["<Control>comma"])
     return app.run(sys.argv)

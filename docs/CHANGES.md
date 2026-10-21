@@ -61,28 +61,47 @@ manifest, which describes what the *app* needs. It's listed in the README's new
 
 ## Extra: Apple-style Settings and New Message
 
-You asked for this between phases. It only changes how the two windows look. They save
-and do the same things as before.
+You asked for this between phases. Both windows save the same settings and do the same
+things as before. The one addition is a Connect Automatically switch, which controls
+behaviour Lime already had.
 
-### Settings popover
+### Settings window
 
-- **Grouped cards.** `settings_group()` builds a rounded box of rows, each with a label on the
-  left and a control on the right, and a hairline between rows. That's the layout of macOS
-  System Settings. `settings_section()` is the small grey heading above each card.
+Settings used to be a popover hanging off the gear button. It's now its own window, like
+the Settings window of a Mac app. The gear button and **Ctrl+,** (the Mac shortcut is ⌘,)
+both open it, and there's only ever one: `open_settings()` brings the existing window to the
+front instead of making a second.
+
+- **Icon tabs in the toolbar.** General and Appearance are two `Gtk.RadioButton`s with
+  `draw_indicator=False`, each holding an icon above a label. Because they share a group, only
+  one can be selected. Selecting one switches a `Gtk.Stack` to that page and sets the window
+  title to the tab's name, as macOS does. Icons are looked up by several names
+  (`Gio.ThemedIcon.new_from_names`), so the first one the user's icon theme has is used.
+- **The window resizes to fit each page.** The stack has `vhomogeneous=False`, so it doesn't
+  reserve the tallest page's height for every page, and `interpolate_size=True` animates the
+  change. The window isn't user-resizable, so GTK sizes it to its content.
+- **The first tab is shown after `show_all()`.** A `Gtk.Stack` refuses to switch to a page
+  that isn't visible yet, so selecting a page before the widgets are shown does nothing.
+- **One config dictionary.** The Settings window uses the main window's `cfg` dict instead
+  of loading its own copy. With two copies, whichever window saved last would overwrite the
+  other's changes.
+- **General tab (new):** shows the paired iPhone and a **Connect Automatically** switch. The
+  switch sets the same `auto_connect` value that Connect and Disconnect already set, and the
+  background reconnect timer already reads it. So it's a new control for existing behaviour,
+  not a new feature. Pressing Connect or Disconnect while Settings is open can change that
+  value, so the tab refreshes whenever the window comes back into focus.
+- **Appearance tab:** bubble colours and window-button position, as before.
+- **Grouped cards.** `settings_group()` builds a rounded box of rows, with a label on the left,
+  a control on the right, and a hairline between rows. That's the layout of macOS Settings.
 - **Round colour swatches.** A `Gtk.ColorButton` draws its colour in a child widget, a
-  "colorswatch", that is wider than it is tall by default. CSS rounds the corners
-  (`border-radius: 999px`), but a wide box with round corners is a pill, not a circle. So the
-  code also forces the swatch to 20×20 with `set_size_request`. A square with fully rounded
-  corners is a circle.
-- **Segmented control instead of a dropdown.** Two `Gtk.RadioButton`s share one group, so
-  only one can be active. `draw_indicator=False` hides the radio dot, which makes GTK draw them
-  as plain buttons. The `.segmented` CSS gives the pair a grey track and the active one
-  (`:checked`) a lighter raised look. `on_window_buttons_changed` now receives `"left"` or
-  `"right"` directly instead of reading a dropdown. Each button's `toggled` handler only acts
-  when that button became *active*, because switching also fires `toggled` on the button
-  that turned off.
-- **"Reset to Defaults"** is a borderless blue text button (`.link-btn`), the way macOS shows
-  a secondary action.
+  "colorswatch", which is wider than it is tall by default. The code forces it to 20×20, and
+  CSS rounds both the swatch and its `overlay` layer. The theme draws the swatch's outline on
+  that overlay, so with only the swatch rounded you got a circle inside a square.
+- **Segmented Left/Right control,** built from radio buttons the same way as the tabs. Each
+  `toggled` handler only acts when its button became *active*, because switching also fires
+  `toggled` on the button that turned off.
+- **macOS-style switch:** grey track, blue when on, round white knob. That's plain CSS on
+  GTK's `switch` and `slider` nodes.
 
 ### New Message window
 
