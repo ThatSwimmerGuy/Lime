@@ -17,6 +17,9 @@ No Apple ID, no Mac, no cloud service: everything stays between your phone and y
 - **Your contacts.** Lime syncs the iPhone's phone book, so chats show names and photos. The
   new-message window lists all your contacts to pick from.
 - **Reactions and replies.** Right-click a message to react (❤️ 👍 👎 😂 ‼️ ❓) or reply to it.
+- **Autocorrect and spell check,** like on a Mac. Typos are fixed when you finish a word; press
+  Backspace right away to undo a fix. Misspelled words get a red underline, and right-clicking one
+  offers suggestions and **Learn Spelling**. Both can be turned off in Settings.
 - **Delete chats.** Right-click a chat in the sidebar to remove it from your computer.
 - **Make it yours.** Under Settings (⚙), choose your own bubble and text colours, and
   whether the window buttons sit on the left (Mac style) or the right.
@@ -29,6 +32,7 @@ No Apple ID, no Mac, no cloud service: everything stays between your phone and y
 - Linux with a Bluetooth adapter
 - Python 3 with GTK 3 (PyGObject) and libnotify
 - BlueZ with its OBEX service (`obexd`)
+- Optional, for autocorrect and spell check: the Enchant library and a Hunspell dictionary
 - An iPhone
 
 ## Install
@@ -56,20 +60,23 @@ make sure Bluetooth is running with `sudo systemctl enable --now bluetooth`.
 **Arch / Manjaro**
 
 ```sh
-sudo pacman -S --needed python-gobject gtk3 libnotify bluez bluez-utils bluez-obex
+sudo pacman -S --needed python-gobject gtk3 libnotify bluez bluez-utils bluez-obex enchant hunspell-en_us
 ```
 
 **Debian / Ubuntu / Linux Mint**
 
 ```sh
-sudo apt install python3-gi gir1.2-gtk-3.0 gir1.2-notify-0.7 bluez bluez-obexd
+sudo apt install python3-gi gir1.2-gtk-3.0 gir1.2-notify-0.7 bluez bluez-obexd libenchant-2-2 hunspell-en-us
 ```
 
 **Fedora**
 
 ```sh
-sudo dnf install python3-gobject gtk3 libnotify bluez bluez-obexd
+sudo dnf install python3-gobject gtk3 libnotify bluez bluez-obexd enchant2 hunspell-en-US
 ```
+
+For spell checking in another language, also install that language's Hunspell dictionary
+(for example `hunspell-de` on Arch). Lime picks the dictionary that matches your system language.
 
 Then make sure Bluetooth is running:
 
@@ -183,8 +190,22 @@ phonemessages/
   contacts.py           phone book sync over Bluetooth PBAP
   bmessage.py           reading and writing the bMessage format MAP uses
   reactions.py          tapback reactions sent and received as text
+  spelling.py           autocorrect and spell check (Enchant)
   store.py              local SQLite message history
+tests/                  unit tests (pytest)
+docs/CHANGES.md         what changed and why, phase by phase
 ```
+
+## Development
+
+Lime's tests use [pytest](https://pytest.org). Install it:
+
+- **Arch / Manjaro:** `sudo pacman -S python-pytest`
+- **Debian / Ubuntu / Linux Mint:** `sudo apt install python3-pytest`
+- **Fedora:** `sudo dnf install python3-pytest`
+
+Then run `pytest` from the repository folder. The tests don't need Bluetooth, an iPhone or a
+display. They also run on GitHub for every push.
 
 ## License
 

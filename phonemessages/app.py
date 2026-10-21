@@ -12,7 +12,7 @@ gi.require_version("Gtk", "3.0")
 gi.require_version("Notify", "0.7")
 from gi.repository import Gio, GLib, Gtk, Gdk, Notify, Pango  # noqa: E402
 
-from . import reactions  # noqa: E402
+from . import reactions, spelling  # noqa: E402
 from .contacts import ContactSync  # noqa: E402
 from .map_client import MapClient, paired_devices  # noqa: E402
 from .store import Store, conv_key  # noqa: E402
@@ -78,9 +78,55 @@ list row:selected { background-color: #2c2c2e; }
 list row:hover:not(:selected) { background-color: #1e1e21; }
 .conv-name { font-weight: 600; font-size: 15px; color: #ffffff; }
 .conv-time, .conv-preview { color: #8e8e93; font-size: 13px; }
-.settings-title { font-size: 17px; font-weight: 700; }
-.settings-section { color: #8e8e93; font-size: 13px; font-weight: 600; margin-top: 4px; }
 .contact-letter { color: #8e8e93; font-size: 13px; font-weight: 700; margin: 10px 18px 2px 18px; }
+
+/* Settings window, laid out like macOS Settings: icon tabs in the toolbar, grouped cards below */
+.settings-window { background-color: @app_bg; }
+.settings-header { border-bottom: none; min-height: 38px; }
+.settings-tab-bar { background-color: @app_bg; border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+                    padding: 0 0 8px 0; }
+.settings-tabs button { background-image: none; background-color: transparent; border: none; box-shadow: none;
+                        border-radius: 7px; padding: 5px 10px 4px 10px; min-width: 62px; color: #a1a1a6; }
+.settings-tabs button:hover { background-color: rgba(255, 255, 255, 0.05); }
+.settings-tabs button:checked { background-color: rgba(255, 255, 255, 0.10); color: #ffffff; }
+.settings-tabs button:checked image { color: #0a84ff; }
+.settings-tab-label { font-size: 11px; }
+.settings-value { color: #8e8e93; font-size: 13px; }
+.settings-footnote { color: #8e8e93; font-size: 11px; margin: 2px 10px 0 10px; }
+/* macOS-style switch: grey track, blue when on, round white knob */
+.settings-window switch { background-image: none; background-color: rgba(120, 120, 128, 0.36); border: none;
+                          border-radius: 999px; min-width: 36px; min-height: 20px; box-shadow: none; color: transparent; }
+.settings-window switch:checked { background-color: #0a84ff; }
+.settings-window switch slider { background-image: none; background-color: #ffffff; border: none; border-radius: 999px;
+                                 min-width: 18px; min-height: 18px; margin: 1px; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.35); }
+.settings-window switch image { color: transparent; }
+.settings-section { color: #8e8e93; font-size: 11px; font-weight: 600; margin: 6px 10px 0 10px; }
+.settings-group { background-color: @raised_bg; border-radius: 10px; border: 1px solid rgba(255, 255, 255, 0.05); }
+.settings-row { min-height: 38px; padding: 0 10px 0 12px; }
+.settings-row > label { font-size: 13px; }
+.settings-sep { background-color: rgba(255, 255, 255, 0.07); min-height: 1px; margin-left: 12px; }
+button.swatch { padding: 0; min-width: 20px; min-height: 20px; border-radius: 999px; background-image: none;
+                background-color: transparent; border: 1px solid rgba(255, 255, 255, 0.25); box-shadow: none; }
+button.swatch colorswatch, button.swatch colorswatch overlay { border-radius: 999px; min-width: 20px; min-height: 20px; }
+.settings-window button.swatch colorswatch, .settings-window button.swatch colorswatch overlay { border-radius: 999px; }
+button.link-btn { background-image: none; background-color: transparent; border: none; box-shadow: none;
+                  color: #0a84ff; font-size: 12px; padding: 2px 6px; min-height: 0; }
+button.link-btn:hover { color: #409cff; }
+/* segmented control: grey track with a raised lighter segment for the choice */
+.segmented { background-color: rgba(118, 118, 128, 0.24); border-radius: 8px; padding: 2px; }
+.segmented button { background-image: none; background-color: transparent; border: none; box-shadow: none;
+                    border-radius: 6px; min-height: 20px; padding: 0 14px; font-size: 12px; color: #ffffff; }
+.segmented button:checked { background-color: #636366; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.35); }
+
+/* New Message window, modelled on the Messages app's "To:" line */
+.new-message, .new-message .dialog-vbox { background-color: @app_bg; }
+.to-row { padding: 6px 16px; border-bottom: 1px solid rgba(255, 255, 255, 0.08); }
+.to-label { color: #8e8e93; font-size: 14px; }
+.to-row entry { background-image: none; background-color: transparent; border: none; box-shadow: none;
+                color: #ffffff; font-size: 14px; min-height: 28px; padding-left: 4px; }
+.to-hint { color: #8e8e93; font-size: 11px; margin: 8px 16px 2px 16px; }
+list.contacts row:selected { background-color: #0a84ff; }
+list.contacts row:selected .conv-preview { color: rgba(255, 255, 255, 0.85); }
 .row-sep { background-color: #38383a; min-height: 1px; margin-left: 72px; }
 
 /* avatars: grey gradient circle with initials, like iOS contacts without a photo */
@@ -312,6 +358,30 @@ def avatar(name, size="small", photo=None):
     return label
 
 
+def settings_section(text):
+    """Small grey heading above a settings group."""
+    label = Gtk.Label(label=text, xalign=0)
+    label.get_style_context().add_class("settings-section")
+    return label
+
+
+def settings_group(rows):
+    """Rounded card of (label, control) rows with hairlines between them, like macOS settings."""
+    group = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+    group.get_style_context().add_class("settings-group")
+    for i, (text, control) in enumerate(rows):
+        if i:
+            sep = Gtk.Box()
+            sep.get_style_context().add_class("settings-sep")
+            group.pack_start(sep, False, False, 0)
+        row = Gtk.Box(spacing=12)
+        row.get_style_context().add_class("settings-row")
+        row.pack_start(Gtk.Label(label=text, xalign=0), True, True, 0)
+        row.pack_end(control, False, False, 0)
+        group.pack_start(row, False, False, 0)
+    return group
+
+
 class Window(Gtk.ApplicationWindow):
     def __init__(self, app):
         super().__init__(application=app, title="Lime")
@@ -343,10 +413,11 @@ class Window(Gtk.ApplicationWindow):
         new_btn.set_tooltip_text("New message")
         new_btn.connect("clicked", self.on_new_clicked)
         header.pack_end(new_btn)
-        settings_btn = Gtk.MenuButton(popover=self.build_settings_popover())
-        settings_btn.add(Gtk.Image.new_from_icon_name("emblem-system-symbolic", Gtk.IconSize.BUTTON))
-        settings_btn.set_tooltip_text("Settings")
+        settings_btn = Gtk.Button.new_from_icon_name("emblem-system-symbolic", Gtk.IconSize.BUTTON)
+        settings_btn.set_tooltip_text("Settings (Ctrl+,)")
+        settings_btn.connect("clicked", lambda b: self.open_settings())
         header.pack_end(settings_btn)
+        self.settings_window = None
 
         outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         self.add(outer)
@@ -423,6 +494,16 @@ class Window(Gtk.ApplicationWindow):
         self.entry.connect("activate", self.on_send)
         self.entry.connect("changed", lambda e: self.update_send_button())
         self.entry.connect("key-press-event", self.on_entry_key)
+        # spelling: autocorrect when a word is finished, red underline, right-click suggestions
+        self.speller = app.speller
+        self.spell_ignored = set()  # words the user undid or ignored, left alone this session
+        self.last_fix = None        # (start, original, replacement) of the latest autocorrection
+        self.menu_index = None      # character the user right-clicked on
+        self.entry.get_buffer().connect("inserted-text", self.on_entry_inserted)
+        self.entry.connect("changed", lambda e: self.update_spelling())
+        self.entry.connect("notify::cursor-position", lambda e, p: self.update_spelling())
+        self.entry.connect("button-press-event", self.on_entry_button)
+        self.entry.connect("populate-popup", self.on_entry_menu)
         self.send_btn = Gtk.Button(valign=Gtk.Align.CENTER)
         self.send_btn.add(Gtk.Image.new_from_icon_name("go-up-symbolic", Gtk.IconSize.BUTTON))
         self.send_btn.get_style_context().add_class("send-btn")
@@ -445,62 +526,16 @@ class Window(Gtk.ApplicationWindow):
 
     # -- devices / connection ---------------------------------------------
 
-    def build_settings_popover(self):
-        grid = Gtk.Grid(row_spacing=8, column_spacing=12, margin=12)
-        title = Gtk.Label(label="Settings", xalign=0)
-        title.get_style_context().add_class("settings-title")
-        grid.attach(title, 0, 0, 2, 1)
-        section = Gtk.Label(label="Bubble colours", xalign=0)
-        section.get_style_context().add_class("settings-section")
-        grid.attach(section, 0, 1, 2, 1)
-        self.color_buttons = {}
-        saved = self.cfg.get("bubble_colors", {})
-        for row, (key, text, default) in enumerate(BUBBLE_COLORS, start=2):
-            rgba = Gdk.RGBA()
-            rgba.parse(saved.get(key, default))
-            btn = Gtk.ColorButton(rgba=rgba, title=text)
-            btn.connect("color-set", self.on_bubble_color_set, key)
-            self.color_buttons[key] = btn
-            grid.attach(Gtk.Label(label=text, xalign=0), 0, row, 1, 1)
-            grid.attach(btn, 1, row, 1, 1)
-        reset = Gtk.Button(label="Reset to defaults")
-        reset.connect("clicked", self.on_bubble_colors_reset)
-        row = len(BUBBLE_COLORS) + 2
-        grid.attach(reset, 0, row, 2, 1)
-        section = Gtk.Label(label="Window buttons", xalign=0)
-        section.get_style_context().add_class("settings-section")
-        grid.attach(section, 0, row + 1, 2, 1)
-        side = Gtk.ComboBoxText()
-        side.append("left", "Left")
-        side.append("right", "Right")
-        side.set_active_id(self.cfg.get("window_buttons", "left"))
-        side.connect("changed", self.on_window_buttons_changed)
-        grid.attach(Gtk.Label(label="Side", xalign=0), 0, row + 2, 1, 1)
-        grid.attach(side, 1, row + 2, 1, 1)
-        grid.show_all()
-        popover = Gtk.Popover()
-        popover.add(grid)
-        return popover
+    def open_settings(self):
+        if not self.settings_window:
+            self.settings_window = SettingsWindow(self)
+            self.settings_window.connect("destroy", lambda w: setattr(self, "settings_window", None))
+        self.settings_window.present()
 
-    def on_window_buttons_changed(self, combo):
-        side = combo.get_active_id()
+    def set_window_buttons(self, side):
         self.cfg["window_buttons"] = side
         save_config(self.cfg)
         self.header.set_decoration_layout(WINDOW_BUTTON_LAYOUTS[side])
-
-    def on_bubble_color_set(self, btn, key):
-        self.cfg.setdefault("bubble_colors", {})[key] = btn.get_rgba().to_string()
-        save_config(self.cfg)
-        self.get_application().apply_bubble_colors(self.cfg["bubble_colors"])
-
-    def on_bubble_colors_reset(self, btn):
-        self.cfg.pop("bubble_colors", None)
-        save_config(self.cfg)
-        for key, _, default in BUBBLE_COLORS:
-            rgba = Gdk.RGBA()
-            rgba.parse(default)
-            self.color_buttons[key].set_rgba(rgba)
-        self.get_application().apply_bubble_colors({})
 
     def load_devices(self):
         self.device_combo.remove_all()
@@ -567,6 +602,7 @@ class Window(Gtk.ApplicationWindow):
     def build_contact_list(self, entry):
         """Alphabetical phone book for the New Message window, filtered by what's typed in entry."""
         contacts = Gtk.ListBox()
+        contacts.get_style_context().add_class("contacts")
 
         def matches(row):
             query = entry.get_text().strip().lower()
@@ -907,28 +943,44 @@ class Window(Gtk.ApplicationWindow):
     # -- sending ----------------------------------------------------------
 
     def on_new_clicked(self, btn):
-        dialog = Gtk.Dialog(title="New Message", transient_for=self, modal=True)
-        dialog.add_buttons("Cancel", Gtk.ResponseType.CANCEL, "Start", Gtk.ResponseType.OK)
+        # header bar with Cancel / Start, like a sheet in the Messages app
+        dialog = Gtk.Dialog(title="New Message", transient_for=self, modal=True, use_header_bar=True)
+        dialog.get_style_context().add_class("new-message")
+        cancel = dialog.add_button("Cancel", Gtk.ResponseType.CANCEL)
+        start = dialog.add_button("Start", Gtk.ResponseType.OK)
+        for button, suggested in ((cancel, False), (start, True)):
+            button.get_style_context().add_class("capsule")
+            if suggested:
+                button.get_style_context().add_class("suggested")
+            button.set_valign(Gtk.Align.CENTER)
         dialog.set_default_response(Gtk.ResponseType.OK)
         dialog.set_default_size(420, 560)
         box = dialog.get_content_area()
-        box.set_spacing(6)
-        box.set_border_width(12)
-        box.add(Gtk.Label(label="To: pick a contact, or type a phone number with country code\n"
-                                "(e.g. +44 7700 900123) or the email address of an iMessage contact",
-                          xalign=0))
-        entry = Gtk.SearchEntry(activates_default=True, placeholder_text="Name, number or email")
-        entry.get_style_context().add_class("search")
-        box.add(entry)
+        box.set_spacing(0)
+        box.set_border_width(0)
+        to_row = Gtk.Box(spacing=4)
+        to_row.get_style_context().add_class("to-row")
+        to_label = Gtk.Label(label="To:")
+        to_label.get_style_context().add_class("to-label")
+        entry = Gtk.SearchEntry(activates_default=True, placeholder_text="Name, number or email", hexpand=True)
+        entry.set_icon_from_icon_name(Gtk.EntryIconPosition.PRIMARY, None)
+        to_row.pack_start(to_label, False, False, 0)
+        to_row.pack_start(entry, True, True, 0)
+        box.pack_start(to_row, False, False, 0)
+        hint = Gtk.Label(label="Pick a contact, or type a number with country code (e.g. +44 7700 900123) "
+                               "or an iMessage email.", xalign=0, wrap=True, max_width_chars=50)
+        hint.get_style_context().add_class("to-hint")
+        box.pack_start(hint, False, False, 0)
         contacts = self.build_contact_list(entry)
         chosen = []
         contacts.connect("row-activated",
                          lambda listbox, row: (chosen.append(row), dialog.response(Gtk.ResponseType.OK)))
-        scroll = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER, vexpand=True)
+        scroll = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER, vexpand=True, margin_top=4)
         scroll.get_style_context().add_class("sidebar")
         scroll.add(contacts)
         box.pack_start(scroll, True, True, 0)
         dialog.show_all()
+        entry.grab_focus()
         response = dialog.run()
         typed = entry.get_text().strip()
         if not chosen and typed and not re.search(r"[\d@]", typed):
@@ -943,6 +995,8 @@ class Window(Gtk.ApplicationWindow):
             self.open_contact(conv_key(typed), typed, self.store.contact_name(typed) or typed)
 
     def on_send(self, widget):
+        if self.spelling_on("autocorrect") and self.entry.get_position() == len(self.entry.get_text()):
+            self.autocorrect_at(self.entry.get_position())  # Enter also finishes the last word
         text = self.entry.get_text().strip()
         if not text or not self.current_address:
             return
@@ -1019,10 +1073,316 @@ class Window(Gtk.ApplicationWindow):
         self.reply_bar.hide()
 
     def on_entry_key(self, entry, event):
+        if event.keyval == Gdk.KEY_BackSpace and self.last_fix and self.undo_autocorrect():
+            return True
         if event.keyval == Gdk.KEY_Escape and self.reply_to:
             self.cancel_reply()
             return True
         return False
+
+    # -- spelling ---------------------------------------------------------
+
+    def spelling_on(self, key):
+        """key is "autocorrect" or "spellcheck"; both are on by default, like on a Mac."""
+        return self.speller is not None and self.cfg.get(key, True)
+
+    def on_entry_inserted(self, buffer, position, new_text, length):
+        if len(new_text) == 1 and new_text in spelling.BOUNDARY:
+            if self.spelling_on("autocorrect"):
+                # wait until GTK has finished inserting and moved the cursor past the space
+                GLib.idle_add(self.autocorrect_after_boundary)
+        else:
+            self.last_fix = None  # typing on means the correction was accepted
+
+    def autocorrect_after_boundary(self):
+        end = self.entry.get_position() - 1
+        text = self.entry.get_text()
+        if 0 <= end < len(text) and text[end] in spelling.BOUNDARY:
+            self.autocorrect_at(end)
+        return False
+
+    def autocorrect_at(self, end):
+        """Fix the word that ends at character `end`, keeping the cursor where it was."""
+        text = self.entry.get_text()
+        found = spelling.word_before(text, end)
+        if not found:
+            return
+        start, word = found
+        fix = spelling.correction(word, text, start, self.speller.check, self.speller.suggest,
+                                  self.spell_ignored)
+        if not fix:
+            return
+        cursor = self.entry.get_position()
+        self.entry.delete_text(start, start + len(word))
+        self.entry.insert_text(fix, start)
+        self.entry.set_position(cursor + len(fix) - len(word))
+        self.last_fix = (start, word, fix)
+
+    def undo_autocorrect(self):
+        """Backspace straight after a correction puts the original word back, as on a Mac."""
+        start, original, fix = self.last_fix
+        self.last_fix = None
+        end = start + len(fix)
+        if self.entry.get_text()[start:end] != fix or self.entry.get_position() != end + 1:
+            return False  # the cursor moved or the text changed: a normal Backspace
+        self.entry.delete_text(start, end + 1)  # the correction and the space after it
+        self.entry.insert_text(original, start)
+        self.entry.set_position(start + len(original))
+        self.spell_ignored.add(original.lower())  # you meant it, so don't fix it again
+        return True
+
+    def update_spelling(self):
+        """Red squiggly underline under misspelled words."""
+        attrs = Pango.AttrList()
+        if self.spelling_on("spellcheck"):
+            text = self.entry.get_text()
+            for start, end in spelling.misspelled(text, self.speller.check, self.entry.get_position(),
+                                                  self.spell_ignored):
+                # Pango counts bytes of UTF-8, not characters
+                first, last = len(text[:start].encode()), len(text[:end].encode())
+                for attr in (Pango.attr_underline_new(Pango.Underline.ERROR),
+                             Pango.attr_underline_color_new(0xffff, 0x4545, 0x3a3a)):
+                    attr.start_index, attr.end_index = first, last
+                    attrs.insert(attr)
+        self.entry.set_attributes(attrs)
+
+    def on_entry_button(self, entry, event):
+        """Remember which character was right-clicked, for the suggestions menu."""
+        self.menu_index = None
+        if event.button != Gdk.BUTTON_SECONDARY:
+            return False
+        # event and layout positions in the entry's own coordinates
+        _, root_x, root_y = event.get_root_coords()
+        alloc = entry.get_allocation()
+        origin_x, origin_y = entry.get_window().get_root_coords(alloc.x, alloc.y)
+        offset_x, offset_y = entry.get_layout_offsets()
+        inside, index, _ = entry.get_layout().xy_to_index(int((root_x - origin_x - offset_x) * Pango.SCALE),
+                                                          int((root_y - origin_y - offset_y) * Pango.SCALE))
+        if inside:
+            self.menu_index = len(entry.get_text().encode()[:index].decode("utf-8", "ignore"))
+        return False
+
+    def on_entry_menu(self, entry, menu):
+        index, self.menu_index = self.menu_index, None
+        if index is None or not self.spelling_on("spellcheck"):
+            return
+        text = entry.get_text()
+        for start, end in spelling.misspelled(text, self.speller.check, None, self.spell_ignored):
+            if start <= index <= end:
+                break
+        else:
+            return
+        word = text[start:end]
+        items = []
+        for guess in self.speller.suggest(word)[:5]:
+            item = Gtk.MenuItem(label=guess)
+            item.connect("activate", lambda i, g=guess: self.replace_word(start, end, g))
+            items.append(item)
+        if not items:
+            items.append(Gtk.MenuItem(label="No Guesses Found", sensitive=False))
+        learn = Gtk.MenuItem(label="Learn Spelling")
+        learn.connect("activate", lambda i: (self.speller.learn(word), self.update_spelling()))
+        ignore = Gtk.MenuItem(label="Ignore Spelling")
+        ignore.connect("activate", lambda i: (self.spell_ignored.add(word.lower()), self.update_spelling()))
+        items += [Gtk.SeparatorMenuItem(), learn, ignore, Gtk.SeparatorMenuItem()]
+        for item in reversed(items):
+            menu.prepend(item)
+        menu.show_all()
+
+    def replace_word(self, start, end, replacement):
+        self.entry.delete_text(start, end)
+        self.entry.insert_text(replacement, start)
+        self.entry.set_position(start + len(replacement))
+
+
+class SettingsWindow(Gtk.Window):
+    """macOS-style Settings window: a toolbar of icon tabs above grouped cards."""
+
+    # tab id, label, icon names (first one the icon theme has wins)
+    TABS = [
+        ("general", "General", ["preferences-system-symbolic", "emblem-system-symbolic"]),
+        ("appearance", "Appearance", ["preferences-desktop-color-symbolic",
+                                      "applications-graphics-symbolic", "color-select-symbolic"]),
+    ]
+
+    def __init__(self, main):
+        super().__init__(title="Settings", transient_for=main, destroy_with_parent=True, resizable=False)
+        self.main = main
+        self.cfg = main.cfg  # shared with the main window, so neither overwrites the other's changes
+        self.get_style_context().add_class("settings-window")
+        self.set_default_size(460, -1)
+
+        self.header = Gtk.HeaderBar(show_close_button=True)
+        self.header.get_style_context().add_class("settings-header")
+        self.set_titlebar(self.header)
+        self.apply_window_buttons()
+
+        outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        self.add(outer)
+        tabs = Gtk.Box(spacing=4, halign=Gtk.Align.CENTER)
+        tabs.get_style_context().add_class("settings-tabs")
+        tab_bar = Gtk.Box()
+        tab_bar.get_style_context().add_class("settings-tab-bar")
+        tab_bar.set_center_widget(tabs)
+        outer.pack_start(tab_bar, False, False, 0)
+
+        # the window shrinks or grows to each page's height, like macOS Settings
+        self.stack = Gtk.Stack(transition_type=Gtk.StackTransitionType.CROSSFADE, transition_duration=150,
+                               interpolate_size=True, vhomogeneous=False)
+        outer.pack_start(self.stack, True, True, 0)
+        self.stack.add_named(self.build_general(), "general")
+        self.stack.add_named(self.build_appearance(), "appearance")
+
+        group = None
+        self.tab_buttons = {}
+        for tab_id, label, icons in self.TABS:
+            btn = Gtk.RadioButton(group=group, draw_indicator=False)
+            self.tab_buttons[tab_id] = btn
+            group = group or btn
+            content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+            image = Gtk.Image.new_from_gicon(Gio.ThemedIcon.new_from_names(icons), Gtk.IconSize.LARGE_TOOLBAR)
+            image.set_pixel_size(22)
+            text = Gtk.Label(label=label)
+            text.get_style_context().add_class("settings-tab-label")
+            content.pack_start(image, False, False, 0)
+            content.pack_start(text, False, False, 0)
+            btn.add(content)
+            btn.connect("toggled", lambda b, t=tab_id, n=label: b.get_active() and self.show_tab(t, n))
+            tabs.pack_start(btn, False, False, 0)
+        self.connect("notify::is-active", lambda w, p: self.is_active() and self.refresh())
+        self.show_all()
+        self.show_tab("general", "General")  # after show_all: a Stack can only switch to visible pages
+
+    def select_tab(self, tab_id):
+        """Switch tabs from code; the button's toggled handler shows the page."""
+        self.tab_buttons[tab_id].set_active(True)
+
+    def show_tab(self, tab_id, label):
+        self.stack.set_visible_child_name(tab_id)
+        self.header.set_title(label)  # macOS titles the window after the open tab
+
+    def apply_window_buttons(self):
+        # only a close button, on the side the user chose (Settings windows don't maximise)
+        self.header.set_decoration_layout("close:" if self.cfg.get("window_buttons", "left") == "left" else ":close")
+
+    @staticmethod
+    def page():
+        return Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_start=20, margin_end=20,
+                       margin_top=16, margin_bottom=20)
+
+    # -- General -------------------------------------------------------------
+
+    def build_general(self):
+        box = self.page()
+        self.phone_label = Gtk.Label()
+        self.phone_label.get_style_context().add_class("settings-value")
+        self.auto_switch = Gtk.Switch(valign=Gtk.Align.CENTER)
+        self.auto_switch.connect("notify::active", self.on_auto_connect_changed)
+        box.pack_start(settings_section("iPhone"), False, False, 0)
+        box.pack_start(settings_group([("Paired iPhone", self.phone_label),
+                                       ("Connect Automatically", self.auto_switch)]), False, False, 0)
+        note = Gtk.Label(label="Lime reconnects on its own when your iPhone comes back in range, "
+                               "and keeps running in the background so you still get notifications.",
+                         xalign=0, wrap=True, max_width_chars=50)
+        note.get_style_context().add_class("settings-footnote")
+        box.pack_start(note, False, False, 0)
+
+        available = self.main.speller is not None
+        rows = []
+        for key, label in (("autocorrect", "Correct Spelling Automatically"),
+                           ("spellcheck", "Check Spelling While Typing")):
+            switch = Gtk.Switch(valign=Gtk.Align.CENTER, sensitive=available,
+                                active=available and self.cfg.get(key, True))
+            switch.connect("notify::active", self.on_spelling_changed, key)
+            rows.append((label, switch))
+        box.pack_start(settings_section("Typing"), False, False, 0)
+        box.pack_start(settings_group(rows), False, False, 0)
+        if available:
+            hint = ("Press Backspace right after a correction to undo it. "
+                    "Right-click an underlined word for suggestions.")
+        else:
+            hint = "Spelling needs the Enchant library and a dictionary, such as hunspell-en_us. See the README."
+        note = Gtk.Label(label=hint, xalign=0, wrap=True, max_width_chars=50)
+        note.get_style_context().add_class("settings-footnote")
+        box.pack_start(note, False, False, 0)
+        self.refresh()
+        return box
+
+    def on_spelling_changed(self, switch, pspec, key):
+        self.cfg[key] = switch.get_active()
+        save_config(self.cfg)
+        self.main.update_spelling()
+
+    def refresh(self):
+        """Show the current device and auto-connect state; Connect/Disconnect can change them."""
+        name = self.main.device_combo.get_active_text() if self.main.device_combo.get_active_id() else None
+        self.phone_label.set_text(name or "None")
+        self.auto_switch.handler_block_by_func(self.on_auto_connect_changed)
+        self.auto_switch.set_active(bool(self.cfg.get("auto_connect")))
+        self.auto_switch.handler_unblock_by_func(self.on_auto_connect_changed)
+
+    def on_auto_connect_changed(self, switch, pspec):
+        self.cfg["auto_connect"] = switch.get_active()
+        address = self.main.device_combo.get_active_id()
+        if address:  # the background reconnect needs to know which phone
+            self.cfg["device"] = address
+        save_config(self.cfg)
+
+    # -- Appearance ----------------------------------------------------------
+
+    def build_appearance(self):
+        box = self.page()
+        self.color_buttons = {}
+        saved = self.cfg.get("bubble_colors", {})
+        rows = []
+        for key, text, default in BUBBLE_COLORS:
+            rgba = Gdk.RGBA()
+            rgba.parse(saved.get(key, default))
+            btn = Gtk.ColorButton(rgba=rgba, title=text, valign=Gtk.Align.CENTER)
+            btn.get_style_context().add_class("swatch")
+            btn.get_child().set_size_request(20, 20)  # the swatch is wider than tall by default
+            btn.connect("color-set", self.on_bubble_color_set, key)
+            self.color_buttons[key] = btn
+            rows.append((text, btn))
+        box.pack_start(settings_section("Bubble Colours"), False, False, 0)
+        box.pack_start(settings_group(rows), False, False, 0)
+        reset = Gtk.Button(label="Reset to Defaults", halign=Gtk.Align.END)
+        reset.get_style_context().add_class("link-btn")
+        reset.connect("clicked", self.on_bubble_colors_reset)
+        box.pack_start(reset, False, False, 0)
+
+        # Left / Right as a segmented control, like a macOS picker
+        segmented = Gtk.Box(valign=Gtk.Align.CENTER)
+        segmented.get_style_context().add_class("segmented")
+        current = self.cfg.get("window_buttons", "left")
+        group = None
+        for side, label in (("left", "Left"), ("right", "Right")):
+            btn = Gtk.RadioButton(label=label, group=group, draw_indicator=False)
+            group = group or btn
+            btn.set_active(side == current)
+            btn.connect("toggled", lambda b, s=side: b.get_active() and self.on_window_buttons_changed(s))
+            segmented.pack_start(btn, False, False, 0)
+        box.pack_start(settings_section("Window Buttons"), False, False, 0)
+        box.pack_start(settings_group([("Position", segmented)]), False, False, 0)
+        return box
+
+    def on_window_buttons_changed(self, side):
+        self.main.set_window_buttons(side)
+        self.apply_window_buttons()
+
+    def on_bubble_color_set(self, btn, key):
+        self.cfg.setdefault("bubble_colors", {})[key] = btn.get_rgba().to_string()
+        save_config(self.cfg)
+        self.main.get_application().apply_bubble_colors(self.cfg["bubble_colors"])
+
+    def on_bubble_colors_reset(self, btn):
+        self.cfg.pop("bubble_colors", None)
+        save_config(self.cfg)
+        for key, _, default in BUBBLE_COLORS:
+            rgba = Gdk.RGBA()
+            rgba.parse(default)
+            self.color_buttons[key].set_rgba(rgba)
+        self.main.get_application().apply_bubble_colors({})
 
 
 class App(Gtk.Application):
@@ -1051,6 +1411,7 @@ class App(Gtk.Application):
                                                  Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION + 1)
         self.apply_bubble_colors(load_config().get("bubble_colors", {}))
         self.store =Store(os.path.join(DATA_DIR, "messages.db"))
+        self.speller = spelling.Speller.load()  # None without Enchant: no spelling features
         self.client = MapClient(CACHE_DIR, self.store.has_handle)
         self.client.connect("message-received", self.on_message_received)
         self.client.connect("state-changed", self.on_client_state)
@@ -1144,4 +1505,8 @@ def main():
     quit_action.connect("activate", lambda *a: app.quit())
     app.add_action(quit_action)
     app.set_accels_for_action("app.quit", ["<Control>q"])
+    settings_action = Gio.SimpleAction.new("settings", None)
+    settings_action.connect("activate", lambda *a: (app.activate(), app.window.open_settings()))
+    app.add_action(settings_action)
+    app.set_accels_for_action("app.settings", ["<Control>comma"])
     return app.run(sys.argv)
