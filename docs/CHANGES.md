@@ -119,3 +119,85 @@ The CSS selector is `.new-message`, not `dialog.new-message`, so the dark backgr
 applies when the screenshot tool moves the dialog's contents into another window.
 
 Phase 3 (GTK 4) will rebuild these windows, and should keep this look.
+
+## Extra: Autocorrect and spell check
+
+Also added between phases, at your request. New file: `phonemessages/spelling.py`, with tests
+in `tests/test_spelling.py`.
+
+### What it does
+
+- **Autocorrect.** When you finish a word with a space, punctuation or Enter, a misspelled
+  word is replaced with the dictionary's best close suggestion, for example `teh` → `the` and
+  `recieve` → `receive`.
+- **Undo with Backspace.** Pressing Backspace straight after a correction puts back what you
+  typed. That word is then left alone for the rest of the session.
+- **Red underline** under misspelled words, but only once you've moved past them. The word
+  you're still typing isn't flagged.
+- **Right-click menu** on an underlined word: up to five suggestions, **Learn Spelling**
+  (adds the word to your personal dictionary for good) and **Ignore Spelling** (this session only).
+- **Settings → General → Typing** has a switch for each feature. Both are on by default, as
+  on a Mac.
+
+### Why Enchant, through ctypes
+
+The usual GTK add-on for this, gspell, isn't in the GNOME Flatpak runtime, so it would have to
+be built into the Flatpak. Enchant, the engine underneath gspell, *is* in the runtime, along with
+Hunspell dictionaries for many languages. `Speller` loads `libenchant-2.so.2` with Python's
+built-in `ctypes` and calls its C functions directly: `enchant_dict_check`, `enchant_dict_suggest`
+and `enchant_dict_add`. That means no new Python package and no new Flatpak module. From source,
+it's one package for Enchant plus one dictionary.
+
+If Enchant or a dictionary is missing, `Speller.load()` returns `None`, every spelling
+method returns early, and the Typing switches are greyed out with a note. Lime works exactly
+as before.
+
+The dictionary comes from your locale: `LANG=en_GB.UTF-8` tries `en_GB`, then `en`, then
+`en_US`.
+
+### How a correction is chosen (`correction()`)
+
+These rules are what make it feel like a Mac rather than a pushy spell checker:
+
+1. **Leave alone:** all-caps words (NASA, LOL), capitalised words in the middle of a sentence
+   (probably names), anything inside a link or email address, words you undid or ignored, and
+   words of one or two letters.
+2. **Chat shorthand first.** A small table fixes `i` → `I`, `im` → `I'm`, `dont` → `don't` and
+   so on. The dictionary alone gets these wrong: Hunspell's first guess for `dont` is "font".
+   `id` and `ill` are real words, so they're in the table as "leave alone".
+3. **Only close suggestions.** Of the dictionary's top three suggestions, the first one within
+   a small *edit distance* is used. That's at most 1 change for words of up to four letters,
+   and 2 for longer words. Edit distance counts the inserts, deletes, substitutions and swaps
+   of neighbouring letters needed to turn one word into the other (`teh` → `the` is one swap).
+   Without this limit, a nonsense word would be "corrected" to something unrelated.
+4. **Keep the capital:** `Teh` at the start of a sentence becomes `The`.
+
+### How it hooks into the text box
+
+- **When to correct:** the entry's text buffer emits `inserted-text` after every change. If
+  the inserted text is a single space or punctuation mark, Lime schedules a correction with
+  `GLib.idle_add`. Waiting until GTK is idle matters: changing the text *during* an insertion
+  confuses GTK, and the cursor only moves past the space afterwards.
+  (`inserted-text` is used rather than the entry's `insert-text` signal, because `insert-text`
+  passes the position as a C pointer that Python can't read cleanly. GLib printed a warning on
+  every keystroke.)
+- **Keeping the cursor in place:** after replacing the word, the cursor moves by the
+  difference in length between the old and new word.
+- **Undo:** `last_fix` remembers the correction. Backspace only undoes it if the cursor is
+  still right after the correction and its space. Any other typing clears `last_fix`.
+- **Underlines:** `update_spelling()` runs on every change and cursor move, and gives the
+  entry a Pango attribute list with an "error" underline in red for each misspelled word.
+  Pango positions are *byte* offsets in UTF-8, not character positions. That's why the code
+  converts with `len(text[:i].encode())`. Without the conversion, underlines would land in
+  the wrong place after any emoji or accented letter.
+- **Right-click:** GTK doesn't say which character was right-clicked, so `on_entry_button`
+  works it out. It converts the click to the entry's coordinates, subtracts where the text
+  layout starts (which accounts for scrolling), and asks Pango which character is there.
+
+### Testing
+
+`tests/test_spelling.py` tests all the decision logic against a small fake dictionary, so
+it runs anywhere. I also checked the ctypes binding against real Enchant and the real compose
+box inside the GNOME 51 Flatpak runtime: typing, autocorrect, Backspace undo, underlines, the
+right-click menu, Enter-to-send and the Settings switches. And I checked that Lime still runs
+normally without Enchant. Not yet tried: your real Lime with Enchant installed.

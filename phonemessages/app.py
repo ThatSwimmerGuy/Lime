@@ -12,7 +12,7 @@ gi.require_version("Gtk", "3.0")
 gi.require_version("Notify", "0.7")
 from gi.repository import Gio, GLib, Gtk, Gdk, Notify, Pango  # noqa: E402
 
-from . import reactions  # noqa: E402
+from . import reactions, spelling  # noqa: E402
 from .contacts import ContactSync  # noqa: E402
 from .map_client import MapClient, paired_devices  # noqa: E402
 from .store import Store, conv_key  # noqa: E402
@@ -494,6 +494,16 @@ class Window(Gtk.ApplicationWindow):
         self.entry.connect("activate", self.on_send)
         self.entry.connect("changed", lambda e: self.update_send_button())
         self.entry.connect("key-press-event", self.on_entry_key)
+        # spelling: autocorrect when a word is finished, red underline, right-click suggestions
+        self.speller = app.speller
+        self.spell_ignored = set()  # words the user undid or ignored, left alone this session
+        self.last_fix = None        # (start, original, replacement) of the latest autocorrection
+        self.menu_index = None      # character the user right-clicked on
+        self.entry.get_buffer().connect("inserted-text", self.on_entry_inserted)
+        self.entry.connect("changed", lambda e: self.update_spelling())
+        self.entry.connect("notify::cursor-position", lambda e, p: self.update_spelling())
+        self.entry.connect("button-press-event", self.on_entry_button)
+        self.entry.connect("populate-popup", self.on_entry_menu)
         self.send_btn = Gtk.Button(valign=Gtk.Align.CENTER)
         self.send_btn.add(Gtk.Image.new_from_icon_name("go-up-symbolic", Gtk.IconSize.BUTTON))
         self.send_btn.get_style_context().add_class("send-btn")
@@ -985,6 +995,8 @@ class Window(Gtk.ApplicationWindow):
             self.open_contact(conv_key(typed), typed, self.store.contact_name(typed) or typed)
 
     def on_send(self, widget):
+        if self.spelling_on("autocorrect") and self.entry.get_position() == len(self.entry.get_text()):
+            self.autocorrect_at(self.entry.get_position())  # Enter also finishes the last word
         text = self.entry.get_text().strip()
         if not text or not self.current_address:
             return
@@ -1061,10 +1073,126 @@ class Window(Gtk.ApplicationWindow):
         self.reply_bar.hide()
 
     def on_entry_key(self, entry, event):
+        if event.keyval == Gdk.KEY_BackSpace and self.last_fix and self.undo_autocorrect():
+            return True
         if event.keyval == Gdk.KEY_Escape and self.reply_to:
             self.cancel_reply()
             return True
         return False
+
+    # -- spelling ---------------------------------------------------------
+
+    def spelling_on(self, key):
+        """key is "autocorrect" or "spellcheck"; both are on by default, like on a Mac."""
+        return self.speller is not None and self.cfg.get(key, True)
+
+    def on_entry_inserted(self, buffer, position, new_text, length):
+        if len(new_text) == 1 and new_text in spelling.BOUNDARY:
+            if self.spelling_on("autocorrect"):
+                # wait until GTK has finished inserting and moved the cursor past the space
+                GLib.idle_add(self.autocorrect_after_boundary)
+        else:
+            self.last_fix = None  # typing on means the correction was accepted
+
+    def autocorrect_after_boundary(self):
+        end = self.entry.get_position() - 1
+        text = self.entry.get_text()
+        if 0 <= end < len(text) and text[end] in spelling.BOUNDARY:
+            self.autocorrect_at(end)
+        return False
+
+    def autocorrect_at(self, end):
+        """Fix the word that ends at character `end`, keeping the cursor where it was."""
+        text = self.entry.get_text()
+        found = spelling.word_before(text, end)
+        if not found:
+            return
+        start, word = found
+        fix = spelling.correction(word, text, start, self.speller.check, self.speller.suggest,
+                                  self.spell_ignored)
+        if not fix:
+            return
+        cursor = self.entry.get_position()
+        self.entry.delete_text(start, start + len(word))
+        self.entry.insert_text(fix, start)
+        self.entry.set_position(cursor + len(fix) - len(word))
+        self.last_fix = (start, word, fix)
+
+    def undo_autocorrect(self):
+        """Backspace straight after a correction puts the original word back, as on a Mac."""
+        start, original, fix = self.last_fix
+        self.last_fix = None
+        end = start + len(fix)
+        if self.entry.get_text()[start:end] != fix or self.entry.get_position() != end + 1:
+            return False  # the cursor moved or the text changed: a normal Backspace
+        self.entry.delete_text(start, end + 1)  # the correction and the space after it
+        self.entry.insert_text(original, start)
+        self.entry.set_position(start + len(original))
+        self.spell_ignored.add(original.lower())  # you meant it, so don't fix it again
+        return True
+
+    def update_spelling(self):
+        """Red squiggly underline under misspelled words."""
+        attrs = Pango.AttrList()
+        if self.spelling_on("spellcheck"):
+            text = self.entry.get_text()
+            for start, end in spelling.misspelled(text, self.speller.check, self.entry.get_position(),
+                                                  self.spell_ignored):
+                # Pango counts bytes of UTF-8, not characters
+                first, last = len(text[:start].encode()), len(text[:end].encode())
+                for attr in (Pango.attr_underline_new(Pango.Underline.ERROR),
+                             Pango.attr_underline_color_new(0xffff, 0x4545, 0x3a3a)):
+                    attr.start_index, attr.end_index = first, last
+                    attrs.insert(attr)
+        self.entry.set_attributes(attrs)
+
+    def on_entry_button(self, entry, event):
+        """Remember which character was right-clicked, for the suggestions menu."""
+        self.menu_index = None
+        if event.button != Gdk.BUTTON_SECONDARY:
+            return False
+        # event and layout positions in the entry's own coordinates
+        _, root_x, root_y = event.get_root_coords()
+        alloc = entry.get_allocation()
+        origin_x, origin_y = entry.get_window().get_root_coords(alloc.x, alloc.y)
+        offset_x, offset_y = entry.get_layout_offsets()
+        inside, index, _ = entry.get_layout().xy_to_index(int((root_x - origin_x - offset_x) * Pango.SCALE),
+                                                          int((root_y - origin_y - offset_y) * Pango.SCALE))
+        if inside:
+            self.menu_index = len(entry.get_text().encode()[:index].decode("utf-8", "ignore"))
+        return False
+
+    def on_entry_menu(self, entry, menu):
+        index, self.menu_index = self.menu_index, None
+        if index is None or not self.spelling_on("spellcheck"):
+            return
+        text = entry.get_text()
+        for start, end in spelling.misspelled(text, self.speller.check, None, self.spell_ignored):
+            if start <= index <= end:
+                break
+        else:
+            return
+        word = text[start:end]
+        items = []
+        for guess in self.speller.suggest(word)[:5]:
+            item = Gtk.MenuItem(label=guess)
+            item.connect("activate", lambda i, g=guess: self.replace_word(start, end, g))
+            items.append(item)
+        if not items:
+            items.append(Gtk.MenuItem(label="No Guesses Found", sensitive=False))
+        learn = Gtk.MenuItem(label="Learn Spelling")
+        learn.connect("activate", lambda i: (self.speller.learn(word), self.update_spelling()))
+        ignore = Gtk.MenuItem(label="Ignore Spelling")
+        ignore.connect("activate", lambda i: (self.spell_ignored.add(word.lower()), self.update_spelling()))
+        items += [Gtk.SeparatorMenuItem(), learn, ignore, Gtk.SeparatorMenuItem()]
+        for item in reversed(items):
+            menu.prepend(item)
+        menu.show_all()
+
+    def replace_word(self, start, end, replacement):
+        self.entry.delete_text(start, end)
+        self.entry.insert_text(replacement, start)
+        self.entry.set_position(start + len(replacement))
 
 
 class SettingsWindow(Gtk.Window):
@@ -1158,8 +1286,32 @@ class SettingsWindow(Gtk.Window):
                          xalign=0, wrap=True, max_width_chars=50)
         note.get_style_context().add_class("settings-footnote")
         box.pack_start(note, False, False, 0)
+
+        available = self.main.speller is not None
+        rows = []
+        for key, label in (("autocorrect", "Correct Spelling Automatically"),
+                           ("spellcheck", "Check Spelling While Typing")):
+            switch = Gtk.Switch(valign=Gtk.Align.CENTER, sensitive=available,
+                                active=available and self.cfg.get(key, True))
+            switch.connect("notify::active", self.on_spelling_changed, key)
+            rows.append((label, switch))
+        box.pack_start(settings_section("Typing"), False, False, 0)
+        box.pack_start(settings_group(rows), False, False, 0)
+        if available:
+            hint = ("Press Backspace right after a correction to undo it. "
+                    "Right-click an underlined word for suggestions.")
+        else:
+            hint = "Spelling needs the Enchant library and a dictionary, such as hunspell-en_us. See the README."
+        note = Gtk.Label(label=hint, xalign=0, wrap=True, max_width_chars=50)
+        note.get_style_context().add_class("settings-footnote")
+        box.pack_start(note, False, False, 0)
         self.refresh()
         return box
+
+    def on_spelling_changed(self, switch, pspec, key):
+        self.cfg[key] = switch.get_active()
+        save_config(self.cfg)
+        self.main.update_spelling()
 
     def refresh(self):
         """Show the current device and auto-connect state; Connect/Disconnect can change them."""
@@ -1259,6 +1411,7 @@ class App(Gtk.Application):
                                                  Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION + 1)
         self.apply_bubble_colors(load_config().get("bubble_colors", {}))
         self.store =Store(os.path.join(DATA_DIR, "messages.db"))
+        self.speller = spelling.Speller.load()  # None without Enchant: no spelling features
         self.client = MapClient(CACHE_DIR, self.store.has_handle)
         self.client.connect("message-received", self.on_message_received)
         self.client.connect("state-changed", self.on_client_state)
