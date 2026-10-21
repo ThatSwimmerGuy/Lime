@@ -2,11 +2,11 @@
 Type=Application
 Name=Lime
 GenericName=iPhone Messages
-Comment=Linux iPhone Messaging Engine: read and send iPhone messages over Bluetooth
+Comment=Read and send your iPhone's messages over Bluetooth
 Keywords=imessage;sms;text;iphone;messages;chat;
-Exec=/path/to/lime-messages/phone-messages
-Icon=lime
+Exec=lime
+Icon=io.github.ThatSwimmerGuy.Lime
 Terminal=false
 Categories=Network;InstantMessaging;
-StartupWMClass=local.Lime
+StartupWMClass=io.github.ThatSwimmerGuy.Lime
 StartupNotify=true

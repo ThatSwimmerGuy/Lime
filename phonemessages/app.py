@@ -17,7 +17,7 @@ from .contacts import ContactSync  # noqa: E402
 from .map_client import MapClient, paired_devices  # noqa: E402
 from .store import Store, conv_key  # noqa: E402
 
-APP_ID = "local.Lime"
+APP_ID = "io.github.ThatSwimmerGuy.Lime"
 DATA_DIR = os.path.join(GLib.get_user_data_dir(), "phone-messages")
 CACHE_DIR = os.path.join(GLib.get_user_cache_dir(), "phone-messages")
 AVATAR_DIR = os.path.join(DATA_DIR, "avatars")
@@ -1138,6 +1138,7 @@ class App(Gtk.Application):
 def main():
     GLib.set_prgname(APP_ID)
     GLib.set_application_name("Lime")
+    Gtk.Window.set_default_icon_name(APP_ID)
     app = App()
     quit_action = Gio.SimpleAction.new("quit", None)
     quit_action.connect("activate", lambda *a: app.quit())

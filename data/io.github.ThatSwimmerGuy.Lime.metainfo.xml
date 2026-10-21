@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.ThatSwimmerGuy.Lime</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+
+  <name>Lime</name>
+  <summary>Read and send iPhone messages</summary>
+  <developer id="io.github.thatswimmerguy">
+    <name>ThatSwimmerGuy</name>
+  </developer>
+
+  <description>
+    <p>
+      Lime (Linux iPhone Messaging Engine) lets you read and reply to your iPhone's text
+      messages from your computer. It connects to the iPhone over Bluetooth, the same way car
+      stereos do, so the iPhone itself sends every message: it goes out as an iMessage or SMS
+      from your own number.
+    </p>
+    <p>
+      No Apple ID, Mac or cloud service is needed. Everything stays between your phone and your computer.
+    </p>
+    <p>Features:</p>
+    <ul>
+      <li>Read and reply to texts, with desktop notifications for new messages</li>
+      <li>Contact names and photos synced from the iPhone, and a contact list for new messages</li>
+      <li>Reactions and replies to individual messages</li>
+      <li>Custom bubble colours and a choice of window-button side</li>
+      <li>Reconnects automatically and keeps running in the background for notifications</li>
+    </ul>
+    <p>
+      Because of how the iPhone shares messages over Bluetooth, Lime only sees messages that
+      arrive while it is connected, and photos and other attachments can't be sent or viewed.
+    </p>
+    <p>
+      Lime is an independent project and is not affiliated with or endorsed by Apple.
+    </p>
+  </description>
+
+  <launchable type="desktop-id">io.github.ThatSwimmerGuy.Lime.desktop</launchable>
+
+  <screenshots>
+    <screenshot type="default">
+      <caption>A conversation</caption>
+      <image>https://raw.githubusercontent.com/ThatSwimmerGuy/lime-messages/v1.0.0/screenshots/conversation.png</image>
+    </screenshot>
+  </screenshots>
+
+  <url type="homepage">https://github.com/ThatSwimmerGuy/lime-messages</url>
+  <url type="bugtracker">https://github.com/ThatSwimmerGuy/lime-messages/issues</url>
+  <url type="vcs-browser">https://github.com/ThatSwimmerGuy/lime-messages</url>
+
+  <branding>
+    <color type="primary" scheme_preference="light">#c9ef8a</color>
+    <color type="primary" scheme_preference="dark">#2f5c10</color>
+  </branding>
+
+  <content_rating type="oars-1.1">
+    <content_attribute id="social-chat">intense</content_attribute>
+  </content_rating>
+
+  <requires>
+    <display_length compare="ge">768</display_length>
+  </requires>
+  <supports>
+    <control>keyboard</control>
+    <control>pointing</control>
+  </supports>
+
+  <categories>
+    <category>Network</category>
+    <category>InstantMessaging</category>
+  </categories>
+
+  <keywords>
+    <keyword>iPhone</keyword>
+    <keyword>SMS</keyword>
+    <keyword>iMessage</keyword>
+    <keyword>Bluetooth</keyword>
+    <keyword>Text</keyword>
+  </keywords>
+
+  <releases>
+    <release version="1.0.0" date="2026-10-20">
+      <description>
+        <p>First release.</p>
+      </description>
+    </release>
+  </releases>
+</component>

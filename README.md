@@ -33,7 +33,25 @@ No Apple ID, no Mac, no cloud service: everything stays between your phone and y
 
 ## Install
 
-### 1. Install the dependencies
+### Flatpak
+
+Lime is packaged as a Flatpak (`io.github.ThatSwimmerGuy.Lime`). Until it's available on Flathub,
+you can build and install it from this repository:
+
+```sh
+flatpak install --user flathub org.flatpak.Builder
+git clone https://github.com/ThatSwimmerGuy/lime-messages.git
+cd lime-messages
+flatpak run org.flatpak.Builder --user --install --force-clean build-dir flatpak/io.github.ThatSwimmerGuy.Lime.yml
+```
+
+Bluetooth itself runs outside the Flatpak, so your system still needs BlueZ and its OBEX
+service: install `bluez` and `bluez-obex` (Arch) or `bluez-obexd` (Debian/Ubuntu/Fedora), and
+make sure Bluetooth is running with `sudo systemctl enable --now bluetooth`.
+
+### From source
+
+#### 1. Install the dependencies
 
 **Arch / Manjaro**
 
@@ -59,14 +77,14 @@ Then make sure Bluetooth is running:
 sudo systemctl enable --now bluetooth
 ```
 
-### 2. Download Lime
+#### 2. Download Lime
 
 ```sh
 git clone https://github.com/ThatSwimmerGuy/lime-messages.git
 cd lime-messages
 ```
 
-### 3. Add it to your app launcher
+#### 3. Add it to your app launcher
 
 ```sh
 ./install.sh
@@ -122,6 +140,8 @@ Everything is stored locally on your computer:
 - Contact photos: `~/.local/share/phone-messages/avatars/`
 - Settings: `~/.config/phone-messages/config.json`
 
+The Flatpak keeps its own copy of these under `~/.var/app/io.github.ThatSwimmerGuy.Lime/`.
+
 ## Limitations
 
 These come from how the iPhone shares messages over Bluetooth, not from Lime:
@@ -151,9 +171,12 @@ These come from how the iPhone shares messages over Bluetooth, not from Lime:
 
 ```
 phone-messages          launcher script (runs python3 -m phonemessages)
-install.sh              adds/removes Lime in your app launcher
-local.Lime.desktop      app launcher entry (install.sh fills in the path)
+install.sh              adds/removes Lime in your app launcher (source install)
+data/                   app launcher entry and app store metadata (metainfo)
+flatpak/                Flatpak manifest and launcher
 icons/lime.svg          app icon
+screenshots/            app store screenshots
+tools/screenshots.py    renders the screenshots from made-up demo data
 phonemessages/
   app.py                window, sidebar, chat view, settings
   map_client.py         Bluetooth MAP connection to the iPhone (via BlueZ over D-Bus)
