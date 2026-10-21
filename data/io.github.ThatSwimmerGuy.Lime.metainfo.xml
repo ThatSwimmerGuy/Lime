@@ -42,13 +42,13 @@
   <screenshots>
     <screenshot type="default">
       <caption>A conversation</caption>
-      <image>https://raw.githubusercontent.com/ThatSwimmerGuy/lime-messages/v1.0.0/screenshots/conversation.png</image>
+      <image>https://raw.githubusercontent.com/ThatSwimmerGuy/Lime/v1.0.0/screenshots/conversation.png</image>
     </screenshot>
   </screenshots>
 
-  <url type="homepage">https://github.com/ThatSwimmerGuy/lime-messages</url>
-  <url type="bugtracker">https://github.com/ThatSwimmerGuy/lime-messages/issues</url>
-  <url type="vcs-browser">https://github.com/ThatSwimmerGuy/lime-messages</url>
+  <url type="homepage">https://github.com/ThatSwimmerGuy/Lime</url>
+  <url type="bugtracker">https://github.com/ThatSwimmerGuy/Lime/issues</url>
+  <url type="vcs-browser">https://github.com/ThatSwimmerGuy/Lime</url>
 
   <branding>
     <color type="primary" scheme_preference="light">#c9ef8a</color>

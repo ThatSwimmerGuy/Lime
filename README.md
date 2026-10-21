@@ -40,8 +40,8 @@ you can build and install it from this repository:
 
 ```sh
 flatpak install --user flathub org.flatpak.Builder
-git clone https://github.com/ThatSwimmerGuy/lime-messages.git
-cd lime-messages
+git clone https://github.com/ThatSwimmerGuy/Lime.git
+cd Lime
 flatpak run org.flatpak.Builder --user --install --force-clean build-dir flatpak/io.github.ThatSwimmerGuy.Lime.yml
 ```
 
@@ -80,8 +80,8 @@ sudo systemctl enable --now bluetooth
 #### 2. Download Lime
 
 ```sh
-git clone https://github.com/ThatSwimmerGuy/lime-messages.git
-cd lime-messages
+git clone https://github.com/ThatSwimmerGuy/Lime.git
+cd Lime
 ```
 
 #### 3. Add it to your app launcher
