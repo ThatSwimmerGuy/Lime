@@ -733,7 +733,9 @@ class Window(Gtk.ApplicationWindow):
         self.show_chat_header()
         self.compose.set_visible(True)
         if self.store.mark_read(conv):
-            self.reload_conversations()
+            # defer: this can run inside the sidebar's row-selected handler, and rebuilding
+            # the list there destroys the row GTK is still handling the click for (segfault)
+            GLib.idle_add(self.reload_conversations)
         self.reload_messages()
         self.entry.grab_focus()
 
