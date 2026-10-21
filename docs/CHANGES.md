@@ -58,3 +58,45 @@ it's unclear iPhones ever send that form, so it's left alone rather than locked 
 `pytest` is only needed to run the tests, not to run Lime. So it isn't added to the Flatpak
 manifest, which describes what the *app* needs. It's listed in the README's new
 "Development" section instead, with the package name for each distro.
+
+## Extra: Apple-style Settings and New Message
+
+You asked for this between phases. It only changes how the two windows look. They save
+and do the same things as before.
+
+### Settings popover
+
+- **Grouped cards.** `settings_group()` builds a rounded box of rows, each with a label on the
+  left and a control on the right, and a hairline between rows. That's the layout of macOS
+  System Settings. `settings_section()` is the small grey heading above each card.
+- **Round colour swatches.** A `Gtk.ColorButton` draws its colour in a child widget, a
+  "colorswatch", that is wider than it is tall by default. CSS rounds the corners
+  (`border-radius: 999px`), but a wide box with round corners is a pill, not a circle. So the
+  code also forces the swatch to 20×20 with `set_size_request`. A square with fully rounded
+  corners is a circle.
+- **Segmented control instead of a dropdown.** Two `Gtk.RadioButton`s share one group, so
+  only one can be active. `draw_indicator=False` hides the radio dot, which makes GTK draw them
+  as plain buttons. The `.segmented` CSS gives the pair a grey track and the active one
+  (`:checked`) a lighter raised look. `on_window_buttons_changed` now receives `"left"` or
+  `"right"` directly instead of reading a dropdown. Each button's `toggled` handler only acts
+  when that button became *active*, because switching also fires `toggled` on the button
+  that turned off.
+- **"Reset to Defaults"** is a borderless blue text button (`.link-btn`), the way macOS shows
+  a secondary action.
+
+### New Message window
+
+- **Header bar with Cancel and Start.** `use_header_bar=True` makes GTK put the dialog's
+  buttons in the title bar: Cancel on the left, Start on the right. They reuse the existing
+  `.capsule` style, and Start gets `.suggested`, which is the blue one.
+- **A "To:" line like the Messages app.** It's a label and a borderless entry, with a hairline
+  under it. It's still a `Gtk.SearchEntry`, because the contact filter listens for its
+  `search-changed` signal. Only the magnifying-glass icon is removed.
+- **Shorter instructions.** The long "To: pick a contact…" text became one small grey hint
+  under the To: line. The information is the same.
+- **Selected contact in blue,** as in macOS lists (`list.contacts row:selected`).
+
+The CSS selector is `.new-message`, not `dialog.new-message`, so the dark background also
+applies when the screenshot tool moves the dialog's contents into another window.
+
+Phase 3 (GTK 4) will rebuild these windows, and should keep this look.

@@ -78,9 +78,38 @@ list row:selected { background-color: #2c2c2e; }
 list row:hover:not(:selected) { background-color: #1e1e21; }
 .conv-name { font-weight: 600; font-size: 15px; color: #ffffff; }
 .conv-time, .conv-preview { color: #8e8e93; font-size: 13px; }
-.settings-title { font-size: 17px; font-weight: 700; }
-.settings-section { color: #8e8e93; font-size: 13px; font-weight: 600; margin-top: 4px; }
 .contact-letter { color: #8e8e93; font-size: 13px; font-weight: 700; margin: 10px 18px 2px 18px; }
+
+/* settings popover, laid out like macOS System Settings: grouped rounded cards */
+popover.settings-popover { background-color: #1c1c1e; border: 1px solid rgba(255, 255, 255, 0.1);
+                           border-radius: 12px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5); }
+.settings-title { font-size: 15px; font-weight: 700; margin: 0 2px 4px 2px; }
+.settings-section { color: #8e8e93; font-size: 11px; font-weight: 600; margin: 6px 10px 0 10px; }
+.settings-group { background-color: @raised_bg; border-radius: 10px; border: 1px solid rgba(255, 255, 255, 0.05); }
+.settings-row { min-height: 38px; padding: 0 10px 0 12px; }
+.settings-row > label { font-size: 13px; }
+.settings-sep { background-color: rgba(255, 255, 255, 0.07); min-height: 1px; margin-left: 12px; }
+button.swatch { padding: 0; min-width: 20px; min-height: 20px; border-radius: 999px; background-image: none;
+                background-color: transparent; border: 1px solid rgba(255, 255, 255, 0.25); box-shadow: none; }
+button.swatch colorswatch { border-radius: 999px; min-width: 20px; min-height: 20px; }
+button.link-btn { background-image: none; background-color: transparent; border: none; box-shadow: none;
+                  color: #0a84ff; font-size: 12px; padding: 2px 6px; min-height: 0; }
+button.link-btn:hover { color: #409cff; }
+/* segmented control: grey track with a raised lighter segment for the choice */
+.segmented { background-color: rgba(118, 118, 128, 0.24); border-radius: 8px; padding: 2px; }
+.segmented button { background-image: none; background-color: transparent; border: none; box-shadow: none;
+                    border-radius: 6px; min-height: 20px; padding: 0 14px; font-size: 12px; color: #ffffff; }
+.segmented button:checked { background-color: #636366; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.35); }
+
+/* New Message window, modelled on the Messages app's "To:" line */
+.new-message, .new-message .dialog-vbox { background-color: @app_bg; }
+.to-row { padding: 6px 16px; border-bottom: 1px solid rgba(255, 255, 255, 0.08); }
+.to-label { color: #8e8e93; font-size: 14px; }
+.to-row entry { background-image: none; background-color: transparent; border: none; box-shadow: none;
+                color: #ffffff; font-size: 14px; min-height: 28px; padding-left: 4px; }
+.to-hint { color: #8e8e93; font-size: 11px; margin: 8px 16px 2px 16px; }
+list.contacts row:selected { background-color: #0a84ff; }
+list.contacts row:selected .conv-preview { color: rgba(255, 255, 255, 0.85); }
 .row-sep { background-color: #38383a; min-height: 1px; margin-left: 72px; }
 
 /* avatars: grey gradient circle with initials, like iOS contacts without a photo */
@@ -312,6 +341,30 @@ def avatar(name, size="small", photo=None):
     return label
 
 
+def settings_section(text):
+    """Small grey heading above a settings group."""
+    label = Gtk.Label(label=text, xalign=0)
+    label.get_style_context().add_class("settings-section")
+    return label
+
+
+def settings_group(rows):
+    """Rounded card of (label, control) rows with hairlines between them, like macOS settings."""
+    group = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+    group.get_style_context().add_class("settings-group")
+    for i, (text, control) in enumerate(rows):
+        if i:
+            sep = Gtk.Box()
+            sep.get_style_context().add_class("settings-sep")
+            group.pack_start(sep, False, False, 0)
+        row = Gtk.Box(spacing=12)
+        row.get_style_context().add_class("settings-row")
+        row.pack_start(Gtk.Label(label=text, xalign=0), True, True, 0)
+        row.pack_end(control, False, False, 0)
+        group.pack_start(row, False, False, 0)
+    return group
+
+
 class Window(Gtk.ApplicationWindow):
     def __init__(self, app):
         super().__init__(application=app, title="Lime")
@@ -446,44 +499,52 @@ class Window(Gtk.ApplicationWindow):
     # -- devices / connection ---------------------------------------------
 
     def build_settings_popover(self):
-        grid = Gtk.Grid(row_spacing=8, column_spacing=12, margin=12)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin=14)
+        box.set_size_request(280, -1)
         title = Gtk.Label(label="Settings", xalign=0)
         title.get_style_context().add_class("settings-title")
-        grid.attach(title, 0, 0, 2, 1)
-        section = Gtk.Label(label="Bubble colours", xalign=0)
-        section.get_style_context().add_class("settings-section")
-        grid.attach(section, 0, 1, 2, 1)
+        box.pack_start(title, False, False, 0)
+
         self.color_buttons = {}
         saved = self.cfg.get("bubble_colors", {})
-        for row, (key, text, default) in enumerate(BUBBLE_COLORS, start=2):
+        rows = []
+        for key, text, default in BUBBLE_COLORS:
             rgba = Gdk.RGBA()
             rgba.parse(saved.get(key, default))
-            btn = Gtk.ColorButton(rgba=rgba, title=text)
+            btn = Gtk.ColorButton(rgba=rgba, title=text, valign=Gtk.Align.CENTER)
+            btn.get_style_context().add_class("swatch")
+            btn.get_child().set_size_request(20, 20)  # the swatch is wider than tall by default
             btn.connect("color-set", self.on_bubble_color_set, key)
             self.color_buttons[key] = btn
-            grid.attach(Gtk.Label(label=text, xalign=0), 0, row, 1, 1)
-            grid.attach(btn, 1, row, 1, 1)
-        reset = Gtk.Button(label="Reset to defaults")
+            rows.append((text, btn))
+        box.pack_start(settings_section("Bubble Colours"), False, False, 0)
+        box.pack_start(settings_group(rows), False, False, 0)
+        reset = Gtk.Button(label="Reset to Defaults", halign=Gtk.Align.END)
+        reset.get_style_context().add_class("link-btn")
         reset.connect("clicked", self.on_bubble_colors_reset)
-        row = len(BUBBLE_COLORS) + 2
-        grid.attach(reset, 0, row, 2, 1)
-        section = Gtk.Label(label="Window buttons", xalign=0)
-        section.get_style_context().add_class("settings-section")
-        grid.attach(section, 0, row + 1, 2, 1)
-        side = Gtk.ComboBoxText()
-        side.append("left", "Left")
-        side.append("right", "Right")
-        side.set_active_id(self.cfg.get("window_buttons", "left"))
-        side.connect("changed", self.on_window_buttons_changed)
-        grid.attach(Gtk.Label(label="Side", xalign=0), 0, row + 2, 1, 1)
-        grid.attach(side, 1, row + 2, 1, 1)
-        grid.show_all()
+        box.pack_start(reset, False, False, 0)
+
+        # Left / Right as a segmented control, like a macOS picker
+        segmented = Gtk.Box(valign=Gtk.Align.CENTER)
+        segmented.get_style_context().add_class("segmented")
+        current = self.cfg.get("window_buttons", "left")
+        group = None
+        for side, label in (("left", "Left"), ("right", "Right")):
+            btn = Gtk.RadioButton(label=label, group=group, draw_indicator=False)
+            group = group or btn
+            btn.set_active(side == current)
+            btn.connect("toggled", lambda b, s=side: b.get_active() and self.on_window_buttons_changed(s))
+            segmented.pack_start(btn, False, False, 0)
+        box.pack_start(settings_section("Window Buttons"), False, False, 0)
+        box.pack_start(settings_group([("Position", segmented)]), False, False, 0)
+
+        box.show_all()
         popover = Gtk.Popover()
-        popover.add(grid)
+        popover.get_style_context().add_class("settings-popover")
+        popover.add(box)
         return popover
 
-    def on_window_buttons_changed(self, combo):
-        side = combo.get_active_id()
+    def on_window_buttons_changed(self, side):
         self.cfg["window_buttons"] = side
         save_config(self.cfg)
         self.header.set_decoration_layout(WINDOW_BUTTON_LAYOUTS[side])
@@ -567,6 +628,7 @@ class Window(Gtk.ApplicationWindow):
     def build_contact_list(self, entry):
         """Alphabetical phone book for the New Message window, filtered by what's typed in entry."""
         contacts = Gtk.ListBox()
+        contacts.get_style_context().add_class("contacts")
 
         def matches(row):
             query = entry.get_text().strip().lower()
@@ -907,28 +969,44 @@ class Window(Gtk.ApplicationWindow):
     # -- sending ----------------------------------------------------------
 
     def on_new_clicked(self, btn):
-        dialog = Gtk.Dialog(title="New Message", transient_for=self, modal=True)
-        dialog.add_buttons("Cancel", Gtk.ResponseType.CANCEL, "Start", Gtk.ResponseType.OK)
+        # header bar with Cancel / Start, like a sheet in the Messages app
+        dialog = Gtk.Dialog(title="New Message", transient_for=self, modal=True, use_header_bar=True)
+        dialog.get_style_context().add_class("new-message")
+        cancel = dialog.add_button("Cancel", Gtk.ResponseType.CANCEL)
+        start = dialog.add_button("Start", Gtk.ResponseType.OK)
+        for button, suggested in ((cancel, False), (start, True)):
+            button.get_style_context().add_class("capsule")
+            if suggested:
+                button.get_style_context().add_class("suggested")
+            button.set_valign(Gtk.Align.CENTER)
         dialog.set_default_response(Gtk.ResponseType.OK)
         dialog.set_default_size(420, 560)
         box = dialog.get_content_area()
-        box.set_spacing(6)
-        box.set_border_width(12)
-        box.add(Gtk.Label(label="To: pick a contact, or type a phone number with country code\n"
-                                "(e.g. +44 7700 900123) or the email address of an iMessage contact",
-                          xalign=0))
-        entry = Gtk.SearchEntry(activates_default=True, placeholder_text="Name, number or email")
-        entry.get_style_context().add_class("search")
-        box.add(entry)
+        box.set_spacing(0)
+        box.set_border_width(0)
+        to_row = Gtk.Box(spacing=4)
+        to_row.get_style_context().add_class("to-row")
+        to_label = Gtk.Label(label="To:")
+        to_label.get_style_context().add_class("to-label")
+        entry = Gtk.SearchEntry(activates_default=True, placeholder_text="Name, number or email", hexpand=True)
+        entry.set_icon_from_icon_name(Gtk.EntryIconPosition.PRIMARY, None)
+        to_row.pack_start(to_label, False, False, 0)
+        to_row.pack_start(entry, True, True, 0)
+        box.pack_start(to_row, False, False, 0)
+        hint = Gtk.Label(label="Pick a contact, or type a number with country code (e.g. +44 7700 900123) "
+                               "or an iMessage email.", xalign=0, wrap=True, max_width_chars=50)
+        hint.get_style_context().add_class("to-hint")
+        box.pack_start(hint, False, False, 0)
         contacts = self.build_contact_list(entry)
         chosen = []
         contacts.connect("row-activated",
                          lambda listbox, row: (chosen.append(row), dialog.response(Gtk.ResponseType.OK)))
-        scroll = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER, vexpand=True)
+        scroll = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER, vexpand=True, margin_top=4)
         scroll.get_style_context().add_class("sidebar")
         scroll.add(contacts)
         box.pack_start(scroll, True, True, 0)
         dialog.show_all()
+        entry.grab_focus()
         response = dialog.run()
         typed = entry.get_text().strip()
         if not chosen and typed and not re.search(r"[\d@]", typed):
