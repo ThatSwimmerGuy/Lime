@@ -184,7 +184,20 @@ phonemessages/
   bmessage.py           reading and writing the bMessage format MAP uses
   reactions.py          tapback reactions sent and received as text
   store.py              local SQLite message history
+tests/                  unit tests (pytest)
+docs/CHANGES.md         what changed and why, phase by phase
 ```
+
+## Development
+
+Lime's tests use [pytest](https://pytest.org). Install it:
+
+- **Arch / Manjaro:** `sudo pacman -S python-pytest`
+- **Debian / Ubuntu / Linux Mint:** `sudo apt install python3-pytest`
+- **Fedora:** `sudo dnf install python3-pytest`
+
+Then run `pytest` from the repository folder. The tests don't need Bluetooth, an iPhone or a
+display. They also run on GitHub for every push.
 
 ## License
 
