@@ -26,7 +26,7 @@ SHORTHAND = {
 # A word: letters, optionally joined by apostrophes (don't, rock'n'roll). No digits.
 WORD_RE = re.compile(r"[^\W\d_]+(?:['’][^\W\d_]+)*")
 # Characters that end a word and trigger autocorrect, like on a Mac.
-BOUNDARY = set(" \t.,!?;:)\"”")
+BOUNDARY = set(" \t\n.,!?;:)\"”")
 
 
 def edit_distance(a, b):

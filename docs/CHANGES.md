@@ -201,3 +201,205 @@ it runs anywhere. I also checked the ctypes binding against real Enchant and the
 box inside the GNOME 51 Flatpak runtime: typing, autocorrect, Backspace undo, underlines, the
 right-click menu, Enter-to-send and the Settings switches. And I checked that Lime still runs
 normally without Enchant. Not yet tried: your real Lime with Enchant installed.
+
+## Extra: Editing sent messages
+
+Right-click one of your own messages and choose **Edit**. The compose box fills with the
+message's text, under an "Editing message" bar (the same bar replies use). Change it and press
+Enter, or press Esc to cancel.
+
+### Why the edit goes out as `*corrected text`
+
+Bluetooth MAP can only push *new* messages to the iPhone. There's no way to change one that
+was already sent, so a real iMessage edit isn't possible. Instead Lime sends the corrected text
+as a new message starting with an asterisk, which is how people already fix typos by text.
+The other person sees two messages; you see one.
+
+Edits other people make on their iPhone don't come through: the iPhone doesn't pass them
+over Bluetooth.
+
+### How it's stored and shown
+
+- The edit is saved as its own row in `messages`, with a new `edit_of` column holding the
+  id of the message it corrects. The row's text is the corrected text *without* the asterisk.
+  Older databases get the column added when Lime starts, like `reply_to` and `reaction` were.
+- `edits.fold()` runs before the reactions are folded in. It hides edit rows and puts the
+  newest text into the original message, keeping the earlier texts in `versions`, oldest
+  first. The bubble therefore stays where the original was in the conversation.
+- Editing a message that was already edited still points at the *original* message, so a
+  message can be edited any number of times and all versions are kept.
+- An edit that fails to send isn't applied. The "Message not sent" bar explains why, just
+  as for a failed reaction.
+- A bubble with versions gets a small blue **Edited** button under it. Clicking it reveals
+  the earlier versions above the bubble, like on iOS. Lime remembers which ones are open
+  until it's restarted, so new messages arriving don't fold them shut again.
+- **Edit** only appears for messages you sent that have finished sending. Messages with an
+  attachment are left out, because their text is the iPhone's "Attachment: 1 Image" line.
+- Sending the text unchanged just leaves edit mode without sending anything.
+
+### Testing
+
+`tests/test_edits.py` checks the asterisk, the new column, and the folding: one edit,
+several edits, a failed edit, and an edit whose original was deleted. I also rendered the
+real window with demo data, with an edited message open and the edit bar showing.
+
+`tools/screenshots.py` had stopped working when autocorrect was added, because its stand-in
+app had no `speller`. It now sets `app.speller = None`.
+
+## Extra: Message box wraps instead of scrolling
+
+A long message used to scroll sideways in a one-line box, so you couldn't see what you'd
+written. The box now wraps onto new lines and grows as you type, like in Messages, up to
+about six lines. After that it scrolls up and down.
+
+### How it works
+
+- The box is now a `Gtk.TextView` (the `ComposeView` class in `app.py`). A `Gtk.Entry` can
+  only ever be one line.
+- `ComposeView` has the same `get_text`, `set_text`, `get_position`, `set_position`,
+  `insert_text` and `delete_text` methods as the old entry, so the send, reply, edit and
+  autocorrect code didn't need to change.
+- **Enter** still sends. **Shift+Enter** starts a new line. A new line also counts as the
+  end of a word, so it triggers autocorrect (`"\n"` was added to `spelling.BOUNDARY`).
+- The red spelling underline is now a text tag on the buffer, not a Pango attribute
+  list. The right-clicked word for suggestions is found with `get_iter_at_location`.
+- A text view has no placeholder, so "iMessage" is a grey label laid over the box. It's
+  hidden while there's text, and clicks pass through it.
+- The box sits in a `ScrolledWindow` with `propagate_natural_height` and
+  `max_content_height=130`, which is what makes it grow and then stop growing. A CSS rule
+  sets the scrollbar's minimum height to 0. Without it, the empty box was taller than one line.
+- The send button now sits at the bottom of the box, like on a Mac.
+
+### Testing
+
+I rendered the real window with demo data three ways: with the box empty, with a
+three-line message, and with a message too long for the box.
+
+## Extra: Link previews
+
+A message with a link in it now shows a card with the page's picture, title and site, like on
+the iPhone. A Google Maps link shows a map of the place and its name. If the message is
+*only* a link, the card replaces the text bubble, as in Messages. Click the card to open the
+link in your browser; right-click it for React, Reply, Edit, Open Link and Copy Link.
+
+New file: `phonemessages/links.py`, with tests in `tests/test_links.py`.
+
+### Where the preview comes from
+
+The iPhone doesn't send previews over Bluetooth, so Lime makes its own the way the iPhone
+does: it downloads the page and reads the tags sites put there for previews, `og:title` and
+`og:image` (Open Graph), with `twitter:*` and the page's `<title>` as fallbacks. Only the
+`<head>` is read, at most 2 MB of it, and pictures over 8 MB are skipped.
+
+- **User-Agent.** Some sites only include these tags for link-preview fetchers, and a plain
+  browser gets a page built by JavaScript with no tags in it. So Lime identifies itself the
+  way Apple's and Facebook's fetchers do (`facebookexternalhit`, `Twitterbot`).
+- **Google Maps.** Google's title is always just "Google Maps", so the place name is taken
+  from the link itself: `/maps/place/Space+Needle/@…` or `?q=Space+Needle`. Short links like
+  `maps.app.goo.gl/…` work because the name is read from the address they redirect to. When
+  Google doesn't know the location, its picture is a map of the ocean at 0,0, so that
+  picture is dropped.
+- **Links without `https://`**, like `www.example.com`, are found too. Punctuation at the end
+  of a sentence isn't counted as part of the link, but a closing bracket that matches one in
+  the link is, as in Wikipedia's `Lime_(fruit)`.
+
+### Caching and background downloads
+
+Each preview is saved in `~/.cache/phone-messages/link-previews/`, as a `.json` file and the
+picture, both named by a hash of the link. So a link is downloaded once, not every time the
+chat is redrawn. A link that has no preview, or that failed to load, is remembered too and tried
+again after a day.
+
+Downloads run on a pool of four background threads (`ThreadPoolExecutor`), so the window
+never freezes waiting for a website. GTK may only be used from the main thread, so when a
+download finishes, the thread hands back to it with `GLib.idle_add`, which redraws the chat.
+`reload_messages(keep_scroll=True)` only scrolls to the bottom if you were already there,
+so a preview loading doesn't yank you away from older messages you're reading.
+
+### The card
+
+The picture is drawn the same way as contact photos in `avatar()`: as a CSS background
+with `background-size: cover`, because GTK 3 clips backgrounds to rounded corners but not
+child widgets. The card is 260 pixels wide, and its height follows the picture's shape,
+between 90 pixels and square. `GdkPixbuf.Pixbuf.get_file_info` checks that GTK can actually
+show the picture format, and reads its size without loading the whole image.
+
+### Privacy
+
+Downloading a link tells that website your IP address. That's fine for links you send. But
+a stranger could text you a link to their own server to find out where you are and that you
+read their message. So links you *receive* are only previewed when they come from someone in
+your contacts. **Settings → General → Links → Show Link Previews** turns previews off
+altogether. The README's privacy line now says that link previews are the one time Lime goes
+online.
+
+### Flatpak
+
+The Flatpak had no network access before, so `--share=network` is added to its
+`finish-args`. Flathub reviewers ask about new permissions, and the answer is "link
+previews". The manifest in your Flathub fork (`~/flathub-fork`) needs the same line.
+
+### Testing
+
+`tests/test_links.py` finds links in text, reads tags from sample pages, handles Google Maps
+links, and checks the cache. It uses a fake internet (`FakeWeb`), so it runs offline.
+I also fetched real previews for a Google Maps place, a Google Maps search, YouTube and
+Wikipedia, and rendered the real window with a Google Maps link in the demo chat.
+`tools/screenshots.py` now includes that link, so taking screenshots needs the internet.
+
+## Extra: Pinned conversations
+
+Right-click a conversation in the sidebar and choose **Pin**. It moves to a grid at the top of
+the sidebar as a big round picture with the name underneath, like pinned conversations in
+Messages. Click it to open the conversation; right-click it to **Unpin** or delete it.
+
+### How it's stored
+
+A new `pins` table holds each pinned conversation's key and a `position`. A new pin goes after
+the others (`MAX(position) + 1`), so the grid keeps the order you pinned them in. Pinning
+something already pinned leaves it where it is. Older databases get the table when Lime starts,
+since it's created with `CREATE TABLE IF NOT EXISTS`. Deleting a conversation also unpins it, so
+no empty tile is left behind.
+
+Like Messages, at most nine conversations can be pinned (three rows of three, `MAX_PINS` in
+`store.py`). With nine pinned, **Pin** is greyed out and its tooltip says to unpin one first.
+
+### How it's shown
+
+- The grid is a `Gtk.FlowBox` with exactly three per row, above the conversation list, in the
+  same scrolling sidebar. Pinned conversations are left out of the list below.
+- An unread pinned conversation gets the blue unread dot on its picture's top-left corner. A
+  border in the background colour separates it from the picture.
+- The open conversation's tile gets the same grey background as a selected row.
+  `highlight_current_pin()` only changes style classes and doesn't rebuild the sidebar,
+  because rebuilding a widget from inside its own click handler crashes GTK. That's the same
+  reason `open_conversation` already defers its sidebar refresh.
+- **Searching** hides the grid and shows pinned conversations in the results like any other,
+  so they can still be found by name, number or message text.
+
+### Testing
+
+`tests/test_pins.py` covers pin order, pinning twice, unpinning and re-pinning (it goes last),
+the nine-pin limit, deleting a pinned conversation, and pins surviving a restart.
+`tools/screenshots.py` now pins Maya, Sam and Dad, and I rendered the real window with them: Maya
+highlighted as the open chat, and Sam showing the unread dot.
+
+### Later fixes to link previews
+
+- **A picture the site refused is tried again.** If downloading the picture fails, for example
+  with "429 Too Many Requests", the preview is still saved and shown with its title, and
+  `image_failed` records the time. After an hour (`RETRY_IMAGE`), `cached()` reports nothing
+  saved, so the link is fetched again. A picture that isn't an image, or is too big, is still
+  skipped for good, because downloading it again won't change that.
+- **Quitting no longer waits for slow websites.** Previews used to download on a
+  `ThreadPoolExecutor`. Python waits for those threads to finish before exiting, so quitting
+  during a slow download could take up to the 10-second timeout. Each download now runs on its
+  own daemon thread, which Python doesn't wait for. A `BoundedSemaphore(4)` still limits them to
+  four at once.
+
+## Release 1.1.0
+
+The store listing (`data/…metainfo.xml`) gets a 1.1.0 release entry listing the new features,
+and the new features are added to its feature list. Its privacy sentence said everything stays
+between the phone and the computer; with link previews that's no longer exactly true, so it now
+says link previews are the one thing that goes online, and that they can be turned off.

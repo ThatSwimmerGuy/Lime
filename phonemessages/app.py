@@ -4,18 +4,20 @@ import json
 import os
 import re
 import sys
+import threading
 import time
 
 import gi
 
 gi.require_version("Gtk", "3.0")
+gi.require_version("GdkPixbuf", "2.0")
 gi.require_version("Notify", "0.7")
-from gi.repository import Gio, GLib, Gtk, Gdk, Notify, Pango  # noqa: E402
+from gi.repository import Gio, GLib, GObject, Gtk, Gdk, GdkPixbuf, Notify, Pango  # noqa: E402
 
-from . import reactions, spelling  # noqa: E402
+from . import edits, links, reactions, spelling  # noqa: E402
 from .contacts import ContactSync  # noqa: E402
 from .map_client import MapClient, paired_devices  # noqa: E402
-from .store import Store, conv_key  # noqa: E402
+from .store import MAX_PINS, Store, conv_key  # noqa: E402
 
 APP_ID = "io.github.ThatSwimmerGuy.Lime"
 DATA_DIR = os.path.join(GLib.get_user_data_dir(), "phone-messages")
@@ -136,6 +138,15 @@ list.contacts row:selected .conv-preview { color: rgba(255, 255, 255, 0.85); }
 }
 .avatar.small { min-width: 44px; min-height: 44px; font-size: 17px; }
 .avatar.large { min-width: 52px; min-height: 52px; font-size: 21px; }
+.avatar.pinned { min-width: 64px; min-height: 64px; font-size: 25px; }
+
+/* pinned conversations at the top of the sidebar */
+.pinned flowboxchild { padding: 0; }
+.pin-tile { border-radius: 12px; }
+.pin-tile:hover { background-color: #1e1e21; }
+.pin-tile.current { background-color: #2c2c2e; }
+.pin-name { color: #ffffff; font-size: 12px; margin: 0 4px; }
+.unread-dot.on-pin { margin: 2px 0 0 0; border: 2px solid @app_bg; }
 
 /* chat header */
 .chat-header { background-color: @app_bg; border-bottom: 1px solid rgba(255, 255, 255, 0.06); padding: 8px 0 6px 0; }
@@ -151,6 +162,13 @@ list.contacts row:selected .conv-preview { color: rgba(255, 255, 255, 0.85); }
 .bubble.failed { background-color: rgba(10, 132, 255, 0.45); }
 .bubble.attachment { padding: 9px 14px; }
 .bubble selection { background-color: rgba(255, 255, 255, 0.35); }
+
+/* link previews: picture on top, title and site underneath, like on the iPhone */
+.link-image { border-radius: 18px 18px 0 0; background-color: #3a3a3c; }
+.link-footer { background-color: #2c2c2e; border-radius: 0 0 18px 18px; padding: 8px 13px 9px 13px; }
+.link-footer.alone { border-radius: 18px; }
+.link-title { color: #ffffff; font-size: 13px; font-weight: 600; }
+.link-site { color: #8e8e93; font-size: 12px; }
 .timestamp { color: #8e8e93; font-size: 11px; font-weight: 600; margin: 12px 0 6px 0; }
 .receipt { color: #8e8e93; font-size: 11px; margin: 2px 4px 0 4px; }
 .receipt.receipt-error { color: #ff453a; }
@@ -159,10 +177,14 @@ list.contacts row:selected .conv-preview { color: rgba(255, 255, 255, 0.85); }
 /* compose bar */
 .compose { background-color: @app_bg; padding: 8px 12px 12px 12px; }
 .pill { border: 1px solid #3a3a3c; border-radius: 20px; padding: 2px 3px 2px 12px; background-color: @app_bg; }
-.pill entry {
+.pill textview, .pill textview text, .pill scrolledwindow {
     background-color: transparent; background-image: none; border: none; box-shadow: none;
-    color: #ffffff; font-size: 15px; min-height: 30px;
+    color: #ffffff; font-size: 15px;
 }
+.pill textview text selection { background-color: rgba(10, 132, 255, 0.5); }
+/* the scrollbar's minimum height would otherwise keep an empty box taller than one line */
+.pill scrollbar, .pill scrollbar slider, .pill scrollbar trough { min-height: 0; }
+.compose-placeholder { color: #6e6e73; font-size: 15px; }
 .send-btn {
     border-radius: 999px; min-width: 28px; min-height: 28px; padding: 0;
     background-image: none; background-color: #0a84ff; border: none; box-shadow: none; color: #ffffff;
@@ -188,6 +210,12 @@ list.contacts row:selected .conv-preview { color: rgba(255, 255, 255, 0.85); }
                     box-shadow: none; color: #8e8e93; padding: 2px; min-height: 0; min-width: 0; }
 .reply-quote { color: #8e8e93; font-size: 13px; border: 1px solid #3a3a3c; border-radius: 14px;
                padding: 4px 11px; margin-bottom: 2px; }
+
+/* edits */
+.edited-btn { background-image: none; background-color: transparent; border: none; box-shadow: none;
+              color: #0a84ff; font-size: 11px; padding: 0 4px; min-height: 0; min-width: 0; }
+.edit-version { color: #8e8e93; font-size: 13px; border: 1px solid #3a3a3c; border-radius: 14px;
+                padding: 4px 11px; margin-bottom: 2px; }
 
 infobar, infobar revealer > box { background-color: @raised_bg; background-image: none; border: none; color: #ffffff; }
 infobar.warning revealer > box { border-left: 3px solid #ff9f0a; }
@@ -382,6 +410,66 @@ def settings_group(rows):
     return group
 
 
+class ComposeView(Gtk.TextView):
+    """Message box that wraps long text onto new lines and grows, like Messages, instead of
+    scrolling sideways. Offers the bits of Gtk.Entry's API the compose code uses.
+    Enter sends ("activate"); Shift+Enter starts a new line."""
+
+    __gsignals__ = {"activate": (GObject.SignalFlags.RUN_LAST, None, ())}
+
+    def __init__(self):
+        super().__init__(wrap_mode=Gtk.WrapMode.WORD_CHAR, accepts_tab=False,
+                         top_margin=6, bottom_margin=6)
+        self.misspelled = self.get_buffer().create_tag(
+            "misspelled", underline=Pango.Underline.ERROR,
+            underline_rgba=Gdk.RGBA(1.0, 0.27, 0.23, 1.0))
+        self.connect("key-press-event", self.on_key)
+
+    def on_key(self, view, event):
+        if event.keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter) \
+                and not event.state & Gdk.ModifierType.SHIFT_MASK:
+            self.emit("activate")
+            return True
+        return False
+
+    def get_text(self):
+        buf = self.get_buffer()
+        return buf.get_text(buf.get_start_iter(), buf.get_end_iter(), False)
+
+    def set_text(self, text):
+        self.get_buffer().set_text(text)
+
+    def get_position(self):
+        buf = self.get_buffer()
+        return buf.get_iter_at_mark(buf.get_insert()).get_offset()
+
+    def set_position(self, position):
+        buf = self.get_buffer()
+        where = buf.get_end_iter() if position < 0 else buf.get_iter_at_offset(position)
+        buf.place_cursor(where)
+
+    def delete_text(self, start, end):
+        buf = self.get_buffer()
+        buf.delete(buf.get_iter_at_offset(start), buf.get_iter_at_offset(end))
+
+    def insert_text(self, text, position):
+        buf = self.get_buffer()
+        buf.insert(buf.get_iter_at_offset(position), text)
+
+    def underline(self, spans):
+        """Red squiggle under each (start, end) character span; clears the old ones."""
+        buf = self.get_buffer()
+        buf.remove_tag(self.misspelled, buf.get_start_iter(), buf.get_end_iter())
+        for start, end in spans:
+            buf.apply_tag(self.misspelled, buf.get_iter_at_offset(start), buf.get_iter_at_offset(end))
+
+    def offset_at(self, event):
+        """Character under a mouse event, or None if it's past the text."""
+        x, y = self.window_to_buffer_coords(Gtk.TextWindowType.TEXT, int(event.x), int(event.y))
+        inside, where = self.get_iter_at_location(x, y)
+        return where.get_offset() if inside else None
+
+
 class Window(Gtk.ApplicationWindow):
     def __init__(self, app):
         super().__init__(application=app, title="Lime")
@@ -439,15 +527,23 @@ class Window(Gtk.ApplicationWindow):
         sidebar.pack_start(title, False, False, 0)
         self.search = Gtk.SearchEntry(placeholder_text="Search")
         self.search.get_style_context().add_class("search")
-        self.search.connect("search-changed", lambda e: self.conv_list.invalidate_filter())
+        self.search.connect("search-changed", lambda e: self.on_search_changed())
         sidebar.pack_start(self.search, False, False, 0)
         self.conv_list = Gtk.ListBox()
         self.conv_list.connect("row-selected", self.on_conv_selected)
         self.conv_list.connect("button-press-event", self.on_conv_button_press)
         self.conv_list.set_filter_func(self.filter_row)
+        # pinned conversations: big round avatars in rows of three above the list, like Messages
+        self.pinned_box = Gtk.FlowBox(min_children_per_line=3, max_children_per_line=3, homogeneous=True,
+                                      selection_mode=Gtk.SelectionMode.NONE, margin_start=8, margin_end=8,
+                                      row_spacing=4, column_spacing=4, no_show_all=True)
+        self.pinned_box.get_style_context().add_class("pinned")
+        conv_column = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        conv_column.pack_start(self.pinned_box, False, False, 0)
+        conv_column.pack_start(self.conv_list, True, True, 0)
         conv_scroll = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER)
         conv_scroll.get_style_context().add_class("sidebar")
-        conv_scroll.add(self.conv_list)
+        conv_scroll.add(conv_column)
         sidebar.pack_start(conv_scroll, True, True, 0)
         paned.pack1(sidebar, False, False)
 
@@ -470,6 +566,10 @@ class Window(Gtk.ApplicationWindow):
         compose = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         compose.get_style_context().add_class("compose")
         self.reply_to = None
+        self.editing = None  # message being edited, shown in the same bar as a reply
+        self.expanded_edits = set()  # edited messages whose earlier versions are showing
+        self.previews = app.previews
+        self.previews_pending = set()  # links being downloaded in the background
         self.reply_bar = Gtk.Box(spacing=6, no_show_all=True)
         self.reply_bar.get_style_context().add_class("reply-bar")
         reply_text = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
@@ -481,7 +581,7 @@ class Window(Gtk.ApplicationWindow):
         reply_text.pack_start(self.reply_snippet, False, False, 0)
         reply_close = Gtk.Button.new_from_icon_name("window-close-symbolic", Gtk.IconSize.BUTTON)
         reply_close.set_valign(Gtk.Align.CENTER)
-        reply_close.set_tooltip_text("Cancel reply (Esc)")
+        reply_close.set_tooltip_text("Cancel (Esc)")
         reply_close.connect("clicked", lambda b: self.cancel_reply())
         self.reply_bar.pack_start(reply_text, True, True, 0)
         self.reply_bar.pack_start(reply_close, False, False, 0)
@@ -490,26 +590,39 @@ class Window(Gtk.ApplicationWindow):
         compose.pack_start(self.reply_bar, False, False, 0)
         pill = Gtk.Box(spacing=4)
         pill.get_style_context().add_class("pill")
-        self.entry = Gtk.Entry(placeholder_text="iMessage", has_frame=False)
+        self.entry = ComposeView()
         self.entry.connect("activate", self.on_send)
-        self.entry.connect("changed", lambda e: self.update_send_button())
+        self.entry.get_buffer().connect("changed", lambda b: self.update_send_button())
         self.entry.connect("key-press-event", self.on_entry_key)
         # spelling: autocorrect when a word is finished, red underline, right-click suggestions
         self.speller = app.speller
         self.spell_ignored = set()  # words the user undid or ignored, left alone this session
         self.last_fix = None        # (start, original, replacement) of the latest autocorrection
         self.menu_index = None      # character the user right-clicked on
-        self.entry.get_buffer().connect("inserted-text", self.on_entry_inserted)
-        self.entry.connect("changed", lambda e: self.update_spelling())
-        self.entry.connect("notify::cursor-position", lambda e, p: self.update_spelling())
+        self.entry.get_buffer().connect_after("insert-text", self.on_entry_inserted)
+        self.entry.get_buffer().connect("changed", lambda b: self.update_spelling())
+        self.entry.get_buffer().connect("notify::cursor-position", lambda b, p: self.update_spelling())
         self.entry.connect("button-press-event", self.on_entry_button)
         self.entry.connect("populate-popup", self.on_entry_menu)
-        self.send_btn = Gtk.Button(valign=Gtk.Align.CENTER)
+        # wraps onto new lines as you type; scrolls only once it's about six lines tall
+        entry_scroll = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER,
+                                          propagate_natural_height=True, max_content_height=130)
+        entry_scroll.add(self.entry)
+        placeholder = Gtk.Label(label="iMessage", xalign=0, valign=Gtk.Align.START, margin_top=6,
+                                no_show_all=True, visible=True)  # show_all mustn't re-show it
+        placeholder.get_style_context().add_class("compose-placeholder")
+        entry_box = Gtk.Overlay()
+        entry_box.add(entry_scroll)
+        entry_box.add_overlay(placeholder)
+        entry_box.set_overlay_pass_through(placeholder, True)
+        self.entry.get_buffer().connect(
+            "changed", lambda b: placeholder.set_visible(b.get_char_count() == 0))
+        self.send_btn = Gtk.Button(valign=Gtk.Align.END, margin_bottom=1)
         self.send_btn.add(Gtk.Image.new_from_icon_name("go-up-symbolic", Gtk.IconSize.BUTTON))
         self.send_btn.get_style_context().add_class("send-btn")
         self.send_btn.set_tooltip_text("Send")
         self.send_btn.connect("clicked", self.on_send)
-        pill.pack_start(self.entry, True, True, 0)
+        pill.pack_start(entry_box, True, True, 0)
         pill.pack_start(self.send_btn, False, False, 0)
         compose.pack_start(pill, True, True, 0)
         right.pack_start(compose, False, False, 0)
@@ -596,8 +709,14 @@ class Window(Gtk.ApplicationWindow):
 
     def filter_row(self, row):
         query = self.search.get_text().strip().lower()
-        return not query or query in row.display.lower() or query in row.preview.lower() \
+        if not query:
+            return not row.pinned  # pinned ones are in the grid above, unless searching
+        return query in row.display.lower() or query in row.preview.lower() \
             or query in (row.address or "").lower()
+
+    def on_search_changed(self):
+        self.conv_list.invalidate_filter()
+        self.pinned_box.set_visible(bool(self.pinned_box.get_children()) and not self.search.get_text().strip())
 
     def build_contact_list(self, entry):
         """Alphabetical phone book for the New Message window, filtered by what's typed in entry."""
@@ -666,10 +785,17 @@ class Window(Gtk.ApplicationWindow):
     def reload_conversations(self):
         for child in self.conv_list.get_children():
             self.conv_list.remove(child)
+        for child in self.pinned_box.get_children():
+            self.pinned_box.remove(child)
         selected = None
         total_unread = 0
+        pins = self.store.pinned()
+        tiles = {}
         for c in self.store.conversations():
+            if c["conv"] in pins:
+                tiles[c["conv"]] = self.pinned_tile(c)
             row = Gtk.ListBoxRow()
+            row.pinned = c["conv"] in pins
             row.conv = c["conv"]
             row.address = c["address"]
             row.display = c["name"] or c["address"]
@@ -702,8 +828,14 @@ class Window(Gtk.ApplicationWindow):
             box.pack_start(grid, True, True, 0)
             row.add(box)
             self.conv_list.add(row)
-            if c["conv"] == self.current_conv:
+            if c["conv"] == self.current_conv and not row.pinned:
                 selected = row
+        for conv in pins:
+            if conv in tiles:
+                self.pinned_box.add(tiles[conv])
+        for child in self.pinned_box.get_children():  # the box itself is no_show_all
+            child.show_all()
+        self.on_search_changed()
         self.conv_list.show_all()
         title = "Lime (%d)" % total_unread if total_unread else "Lime"
         self.header.set_title(title)
@@ -712,6 +844,68 @@ class Window(Gtk.ApplicationWindow):
             self.conv_list.handler_block_by_func(self.on_conv_selected)
             self.conv_list.select_row(selected)
             self.conv_list.handler_unblock_by_func(self.on_conv_selected)
+
+    def pinned_tile(self, c):
+        """A pinned conversation: big avatar with its name under it and an unread dot beside it."""
+        display = c["name"] or c["address"]
+        tile = Gtk.EventBox()
+        tile.conv = c["conv"]
+        tile.get_style_context().add_class("pin-tile")
+        if c["conv"] == self.current_conv:
+            tile.get_style_context().add_class("current")
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4, margin_top=8, margin_bottom=8)
+        picture = Gtk.Overlay(halign=Gtk.Align.CENTER)
+        picture.add(avatar(display, "pinned", c["photo"]))
+        if c["unread"]:
+            dot = Gtk.Box(halign=Gtk.Align.START, valign=Gtk.Align.START)
+            dot.get_style_context().add_class("unread-dot")
+            dot.get_style_context().add_class("on-pin")
+            picture.add_overlay(dot)
+        box.pack_start(picture, False, False, 0)
+        name = Gtk.Label(label=display, ellipsize=Pango.EllipsizeMode.END, max_width_chars=1)
+        name.get_style_context().add_class("pin-name")
+        box.pack_start(name, False, False, 0)
+        tile.add(box)
+        tile.set_tooltip_text(display)
+        tile.connect("button-press-event", self.on_pinned_button, c["conv"], c["address"], display)
+        return tile
+
+    def highlight_current_pin(self):
+        # only restyles: the sidebar can't be rebuilt from inside a tile's own click handler
+        for child in self.pinned_box.get_children():
+            tile = child.get_child()
+            ctx = tile.get_style_context()
+            (ctx.add_class if tile.conv == self.current_conv else ctx.remove_class)("current")
+
+    def on_pinned_button(self, tile, event, conv, address, display):
+        if event.type != Gdk.EventType.BUTTON_PRESS:
+            return False
+        if event.button == Gdk.BUTTON_PRIMARY:
+            self.conv_list.unselect_all()
+            self.open_conversation(conv, address, display)
+        elif event.button == Gdk.BUTTON_SECONDARY:
+            self.popup_conversation_menu(event, tile, conv, display, pinned=True)
+        return True
+
+    def popup_conversation_menu(self, event, widget, conv, display, pinned):
+        menu = Gtk.Menu()
+        if pinned:
+            pin = Gtk.MenuItem(label="Unpin")
+            pin.connect("activate", lambda item: (self.store.unpin(conv), self.reload_conversations()))
+        else:
+            full = len(self.store.pinned()) >= MAX_PINS
+            pin = Gtk.MenuItem(label="Pin", sensitive=not full)
+            if full:
+                pin.set_tooltip_text("You can pin up to %d conversations. Unpin one first." % MAX_PINS)
+            pin.connect("activate", lambda item: (self.store.pin(conv), self.reload_conversations()))
+        menu.append(pin)
+        menu.append(Gtk.SeparatorMenuItem())
+        delete = Gtk.MenuItem(label="Delete Conversation…")
+        delete.connect("activate", lambda item: self.confirm_delete_conversation(conv, display))
+        menu.append(delete)
+        menu.show_all()
+        menu.attach_to_widget(widget, None)
+        menu.popup_at_pointer(event)
 
     def on_focus_changed(self, win, pspec):
         if self.is_active() and self.current_conv and self.store.mark_read(self.current_conv):
@@ -728,13 +922,7 @@ class Window(Gtk.ApplicationWindow):
         row = listbox.get_row_at_y(int(event.y))
         if row is None:
             return False
-        menu = Gtk.Menu()
-        delete = Gtk.MenuItem(label="Delete Conversation…")
-        delete.connect("activate", lambda item: self.confirm_delete_conversation(row.conv, row.display))
-        menu.append(delete)
-        menu.show_all()
-        menu.attach_to_widget(listbox, None)
-        menu.popup_at_pointer(event)
+        self.popup_conversation_menu(event, listbox, row.conv, row.display, row.pinned)
         return True
 
     def confirm_delete_conversation(self, conv, display):
@@ -765,6 +953,7 @@ class Window(Gtk.ApplicationWindow):
         self.current_conv = conv
         self.current_address = address
         self.current_name = display
+        self.highlight_current_pin()
         self.cancel_reply()
         self.show_chat_header()
         self.compose.set_visible(True)
@@ -792,10 +981,14 @@ class Window(Gtk.ApplicationWindow):
         else:
             self.chat_header.hide()
 
-    def reload_messages(self):
+    def reload_messages(self, keep_scroll=False):
+        adj = self.msg_scroll.get_vadjustment()
+        at_bottom = adj.get_value() >= adj.get_upper() - adj.get_page_size() - 2
+        scrolled_to = adj.get_value()
         for child in self.msg_box.get_children():
             self.msg_box.remove(child)
-        msgs, badges = self.fold_reactions(self.store.messages(self.current_conv) if self.current_conv else [])
+        msgs = edits.fold(self.store.messages(self.current_conv)) if self.current_conv else []
+        msgs, badges = self.fold_reactions(msgs)
         if not msgs:
             empty = Gtk.Label(label="No messages yet", vexpand=True)
             empty.get_style_context().add_class("empty-chat")
@@ -815,7 +1008,10 @@ class Window(Gtk.ApplicationWindow):
             self.add_bubble(m, starts_group, ends_group, show_receipt=(i == last_out),
                             reacts=badges.get(m["id"]))
         self.msg_box.show_all()
-        GLib.idle_add(self.scroll_to_bottom)
+        if keep_scroll and not at_bottom:  # don't yank someone reading older messages to the end
+            GLib.idle_add(lambda: adj.set_value(scrolled_to) and False)
+        else:
+            GLib.idle_add(self.scroll_to_bottom)
 
     def fold_reactions(self, msgs):
         """Split reaction messages out; returns (messages to show, {message id: [(emoji, mine)]})."""
@@ -860,8 +1056,11 @@ class Window(Gtk.ApplicationWindow):
             quote.get_style_context().add_class("reply-quote")
             wrapper.pack_start(quote, False, False, 0)
         text, attachments = split_attachments(text)
+        url = None if attachments else links.find_url(text)
+        preview = self.link_preview(url, m) if url else None
+        only_link = preview and text.strip() in (url, url.split("://", 1)[1])
         pieces = []
-        if text or not attachments:
+        if (text or not attachments) and not only_link:  # a lone link shows as just its card
             pieces.append(Gtk.Label(label=text))
         for emoji, what in attachments:
             card = Gtk.Label()
@@ -880,6 +1079,8 @@ class Window(Gtk.ApplicationWindow):
             ctx.add_class("out" if outgoing else "in")
             if m["status"] == "failed":
                 ctx.add_class("failed")
+        if preview:
+            pieces.append(self.link_card(preview, m["id"], align))
         if ends_group:
             pieces[-1].get_style_context().add_class("tail")
         if len(pieces) == 1:
@@ -908,6 +1109,9 @@ class Window(Gtk.ApplicationWindow):
         else:
             wrapper.pack_start(label, False, False, 0)
 
+        if m["versions"]:
+            self.add_edit_history(wrapper, m, align)
+
         receipt = None
         if m["status"] == "failed":
             receipt = Gtk.Label(label="Not Delivered  ⓘ", halign=align)
@@ -921,6 +1125,115 @@ class Window(Gtk.ApplicationWindow):
             wrapper.pack_start(receipt, False, False, 0)
         wrapper.set_tooltip_text(time.strftime("%a %d %b %Y, %H:%M", time.localtime(m["ts"])))
         self.msg_box.pack_start(wrapper, False, False, 0)
+
+    def link_preview(self, url, m):
+        """The saved preview for a message's link, or None; starts downloading it if needed."""
+        if not self.cfg.get("link_previews", True):
+            return None
+        preview = self.previews.cached(url)
+        if preview:
+            return None if preview.get("failed") else preview
+        # only links you sent or that a contact sent: opening a stranger's link would tell
+        # them your IP address and that you read their message
+        if (m["outgoing"] or self.store.contact_name(m["address"])) and url not in self.previews_pending:
+            self.previews_pending.add(url)
+
+            slots = self.get_application().preview_slots
+
+            def work():  # in a background thread; GTK may only be touched from the main one
+                with slots:
+                    self.previews.fetch(url)
+                GLib.idle_add(self.on_preview_ready, url)
+            # a daemon thread: quitting Lime doesn't wait for a slow website
+            threading.Thread(target=work, daemon=True).start()
+        return None
+
+    def on_preview_ready(self, url):
+        self.previews_pending.discard(url)
+        if self.current_conv and self.get_visible():
+            self.reload_messages(keep_scroll=True)
+        return False
+
+    def link_card(self, preview, msg_id, align, width=260):
+        """Picture, title and site of a link, in a rounded card; clicking it opens the link."""
+        card = Gtk.EventBox(halign=align, visible_window=False)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        card.add(box)
+        image = preview.get("image_path")
+        info = GdkPixbuf.Pixbuf.get_file_info(image) if image and os.path.exists(image) else None
+        if info and info[0]:  # a picture format GTK can show
+            _, w, h = info
+            picture = Gtk.Box()
+            picture.set_size_request(width, max(90, min(width, width * h // max(w, 1))))
+            provider = Gtk.CssProvider()
+            provider.load_from_data(('* { background-image: url("%s"); background-size: cover;'
+                                     ' background-position: center; }' % Gio.File.new_for_path(image).get_uri()).encode())
+            picture.get_style_context().add_provider(provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+            picture.get_style_context().add_class("link-image")
+            box.pack_start(picture, False, False, 0)
+        footer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=1)
+        footer.set_size_request(width, -1)
+        footer.get_style_context().add_class("link-footer")
+        if not info or not info[0]:
+            footer.get_style_context().add_class("alone")
+        if preview.get("title"):
+            title = Gtk.Label(label=preview["title"], xalign=0, wrap=True, lines=2, max_width_chars=1,
+                              ellipsize=Pango.EllipsizeMode.END)
+            title.get_style_context().add_class("link-title")
+            footer.pack_start(title, False, False, 0)
+        site = Gtk.Label(label=preview.get("site") or links.domain(preview["url"]), xalign=0,
+                         ellipsize=Pango.EllipsizeMode.END, max_width_chars=1)
+        site.get_style_context().add_class("link-site")
+        footer.pack_start(site, False, False, 0)
+        box.pack_start(footer, False, False, 0)
+        card.set_tooltip_text(preview["url"])
+        card.connect("realize", lambda w: w.get_window().set_cursor(
+            Gdk.Cursor.new_from_name(w.get_display(), "pointer")))
+        card.connect("button-press-event", self.on_link_card_button, preview["url"], msg_id)
+        return card
+
+    def on_link_card_button(self, card, event, url, msg_id):
+        if event.type != Gdk.EventType.BUTTON_PRESS:
+            return False
+        if event.button == Gdk.BUTTON_PRIMARY:
+            Gtk.show_uri_on_window(self, url, event.time)
+        elif event.button == Gdk.BUTTON_SECONDARY:  # same menu as a bubble, with the link items last
+            menu = Gtk.Menu()
+            open_link = Gtk.MenuItem(label="Open Link")
+            open_link.connect("activate", lambda i: Gtk.show_uri_on_window(self, url, Gdk.CURRENT_TIME))
+            copy = Gtk.MenuItem(label="Copy Link")
+            copy.connect("activate", lambda i: Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD).set_text(url, -1))
+            menu.append(open_link)
+            menu.append(copy)
+            self.on_bubble_menu(card, menu, msg_id)  # puts React, Reply and Edit above them
+            menu.attach_to_widget(card)
+            menu.popup_at_pointer(event)
+        return True
+
+    def add_edit_history(self, wrapper, m, align):
+        """"Edited" under the bubble; clicking it shows the earlier versions above, like on iOS."""
+        history = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, halign=align)
+        for old in m["versions"]:
+            version = Gtk.Label(label=old, halign=align, xalign=0, wrap=True,
+                                wrap_mode=Pango.WrapMode.WORD_CHAR, max_width_chars=48, selectable=True)
+            version.set_can_focus(False)
+            version.get_style_context().add_class("edit-version")
+            history.pack_start(version, False, False, 0)
+        revealer = Gtk.Revealer(reveal_child=m["id"] in self.expanded_edits)
+        revealer.add(history)
+        wrapper.pack_start(revealer, False, False, 0)
+        wrapper.reorder_child(revealer, len(wrapper.get_children()) - 2)  # above the bubble
+        edited = Gtk.Button(label="Edited", halign=align, relief=Gtk.ReliefStyle.NONE)
+        edited.get_style_context().add_class("edited-btn")
+        edited.set_tooltip_text("Show or hide earlier versions")
+
+        def toggle(btn):
+            shown = not revealer.get_reveal_child()
+            revealer.set_reveal_child(shown)
+            (self.expanded_edits.add if shown else self.expanded_edits.discard)(m["id"])
+
+        edited.connect("clicked", toggle)
+        wrapper.pack_start(edited, False, False, 0)
 
     def scroll_to_bottom(self):
         adj = self.msg_scroll.get_vadjustment()
@@ -1004,6 +1317,12 @@ class Window(Gtk.ApplicationWindow):
             self.show_info("<b>Not connected.</b> Connect to your iPhone before sending.",
                            Gtk.MessageType.WARNING)
             return
+        editing = self.editing
+        if editing:
+            self.cancel_reply()
+            if text != self.current_text(editing):
+                self.send_text(edits.wire_text(text), text, edit_of=editing["id"])
+            return
         reply_to = self.reply_to
         wire_text = text
         if reply_to:  # Bluetooth can't make real threaded replies, so quote the original
@@ -1023,12 +1342,12 @@ class Window(Gtk.ApplicationWindow):
         text = reactions.wire_text(emoji, target["text"])
         self.send_text(text, text, reply_to=msg_id, reaction=emoji)
 
-    def send_text(self, wire_text, store_text, reply_to=None, reaction=None):
+    def send_text(self, wire_text, store_text, reply_to=None, reaction=None, edit_of=None):
         """Store a message as "sending", have the phone send it, then record the result."""
         conv = self.current_conv
         address = self.current_address
         msg_id = self.store.add(address, store_text, outgoing=True, status="sending",
-                                reply_to=reply_to, reaction=reaction)
+                                reply_to=reply_to, reaction=reaction, edit_of=edit_of)
         self.on_message_stored(conv)
 
         def done(ok, error):
@@ -1053,6 +1372,12 @@ class Window(Gtk.ApplicationWindow):
         reply = Gtk.MenuItem(label="Reply")
         reply.connect("activate", lambda i: self.start_reply(msg_id))
         menu.prepend(Gtk.SeparatorMenuItem())
+        m = self.store.get(msg_id)
+        if m and m["outgoing"] and m["status"] not in ("sending", "failed") \
+                and not split_attachments(m["text"])[1]:  # attachment captions can't be changed
+            edit = Gtk.MenuItem(label="Edit")
+            edit.connect("activate", lambda i: self.start_edit(msg_id))
+            menu.prepend(edit)
         menu.prepend(reply)
         menu.prepend(react)
         menu.show_all()
@@ -1061,6 +1386,7 @@ class Window(Gtk.ApplicationWindow):
         m = self.store.get(msg_id)
         if not m:
             return
+        self.cancel_reply()
         self.reply_to = m
         who = "yourself" if m["outgoing"] else (self.current_name or m["address"])
         self.reply_title.set_text("Replying to " + who)
@@ -1069,13 +1395,41 @@ class Window(Gtk.ApplicationWindow):
         self.entry.grab_focus()
 
     def cancel_reply(self):
+        """Leave reply or edit mode."""
+        if self.editing:
+            self.entry.set_text("")
         self.reply_to = None
+        self.editing = None
         self.reply_bar.hide()
+
+    # -- edits ------------------------------------------------------------
+
+    def current_text(self, m):
+        """A message's text after any edits."""
+        shown = [s for s in edits.fold(self.store.messages(m["conv"])) if s["id"] == m["id"]]
+        return shown[0]["text"] if shown else m["text"]
+
+    def start_edit(self, msg_id):
+        m = self.store.get(msg_id)
+        if not m:
+            return
+        self.cancel_reply()
+        self.editing = m
+        text = self.current_text(m)
+        found = REPLY_RE.match(text)
+        if found and not m["reply_to"]:
+            text = found.group(2)
+        self.reply_title.set_text("Editing message")
+        self.reply_snippet.set_text(text.replace("\n", " "))
+        self.reply_bar.show()
+        self.entry.set_text(text)
+        self.entry.grab_focus()
+        self.entry.set_position(-1)
 
     def on_entry_key(self, entry, event):
         if event.keyval == Gdk.KEY_BackSpace and self.last_fix and self.undo_autocorrect():
             return True
-        if event.keyval == Gdk.KEY_Escape and self.reply_to:
+        if event.keyval == Gdk.KEY_Escape and (self.reply_to or self.editing):
             self.cancel_reply()
             return True
         return False
@@ -1086,7 +1440,7 @@ class Window(Gtk.ApplicationWindow):
         """key is "autocorrect" or "spellcheck"; both are on by default, like on a Mac."""
         return self.speller is not None and self.cfg.get(key, True)
 
-    def on_entry_inserted(self, buffer, position, new_text, length):
+    def on_entry_inserted(self, buffer, where, new_text, length):
         if len(new_text) == 1 and new_text in spelling.BOUNDARY:
             if self.spelling_on("autocorrect"):
                 # wait until GTK has finished inserting and moved the cursor past the space
@@ -1133,33 +1487,17 @@ class Window(Gtk.ApplicationWindow):
 
     def update_spelling(self):
         """Red squiggly underline under misspelled words."""
-        attrs = Pango.AttrList()
+        spans = []
         if self.spelling_on("spellcheck"):
-            text = self.entry.get_text()
-            for start, end in spelling.misspelled(text, self.speller.check, self.entry.get_position(),
-                                                  self.spell_ignored):
-                # Pango counts bytes of UTF-8, not characters
-                first, last = len(text[:start].encode()), len(text[:end].encode())
-                for attr in (Pango.attr_underline_new(Pango.Underline.ERROR),
-                             Pango.attr_underline_color_new(0xffff, 0x4545, 0x3a3a)):
-                    attr.start_index, attr.end_index = first, last
-                    attrs.insert(attr)
-        self.entry.set_attributes(attrs)
+            spans = spelling.misspelled(self.entry.get_text(), self.speller.check,
+                                        self.entry.get_position(), self.spell_ignored)
+        self.entry.underline(spans)
 
     def on_entry_button(self, entry, event):
         """Remember which character was right-clicked, for the suggestions menu."""
         self.menu_index = None
-        if event.button != Gdk.BUTTON_SECONDARY:
-            return False
-        # event and layout positions in the entry's own coordinates
-        _, root_x, root_y = event.get_root_coords()
-        alloc = entry.get_allocation()
-        origin_x, origin_y = entry.get_window().get_root_coords(alloc.x, alloc.y)
-        offset_x, offset_y = entry.get_layout_offsets()
-        inside, index, _ = entry.get_layout().xy_to_index(int((root_x - origin_x - offset_x) * Pango.SCALE),
-                                                          int((root_y - origin_y - offset_y) * Pango.SCALE))
-        if inside:
-            self.menu_index = len(entry.get_text().encode()[:index].decode("utf-8", "ignore"))
+        if event.button == Gdk.BUTTON_SECONDARY:
+            self.menu_index = entry.offset_at(event)
         return False
 
     def on_entry_menu(self, entry, menu):
@@ -1305,6 +1643,16 @@ class SettingsWindow(Gtk.Window):
         note = Gtk.Label(label=hint, xalign=0, wrap=True, max_width_chars=50)
         note.get_style_context().add_class("settings-footnote")
         box.pack_start(note, False, False, 0)
+
+        previews = Gtk.Switch(valign=Gtk.Align.CENTER, active=self.cfg.get("link_previews", True))
+        previews.connect("notify::active", self.on_link_previews_changed)
+        box.pack_start(settings_section("Links"), False, False, 0)
+        box.pack_start(settings_group([("Show Link Previews", previews)]), False, False, 0)
+        note = Gtk.Label(label="Lime downloads the picture and title from the website. Links you "
+                               "receive are only previewed when they come from one of your contacts.",
+                         xalign=0, wrap=True, max_width_chars=50)
+        note.get_style_context().add_class("settings-footnote")
+        box.pack_start(note, False, False, 0)
         self.refresh()
         return box
 
@@ -1312,6 +1660,11 @@ class SettingsWindow(Gtk.Window):
         self.cfg[key] = switch.get_active()
         save_config(self.cfg)
         self.main.update_spelling()
+
+    def on_link_previews_changed(self, switch, pspec):
+        self.cfg["link_previews"] = switch.get_active()
+        save_config(self.cfg)
+        self.main.reload_messages(keep_scroll=True)
 
     def refresh(self):
         """Show the current device and auto-connect state; Connect/Disconnect can change them."""
@@ -1412,6 +1765,8 @@ class App(Gtk.Application):
         self.apply_bubble_colors(load_config().get("bubble_colors", {}))
         self.store =Store(os.path.join(DATA_DIR, "messages.db"))
         self.speller = spelling.Speller.load()  # None without Enchant: no spelling features
+        self.previews = links.Previews(os.path.join(CACHE_DIR, "link-previews"))
+        self.preview_slots = threading.BoundedSemaphore(4)  # link previews downloading at once
         self.client = MapClient(CACHE_DIR, self.store.has_handle)
         self.client.connect("message-received", self.on_message_received)
         self.client.connect("state-changed", self.on_client_state)

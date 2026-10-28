@@ -5,6 +5,7 @@ Usage, from the project root:  PYTHONPATH=. python3 tools/screenshots.py screens
 import os
 import sys
 import tempfile
+import threading
 import time
 
 demo = tempfile.mkdtemp(prefix="lime-demo-")
@@ -15,7 +16,7 @@ import gi  # noqa: E402
 gi.require_version("Gtk", "3.0")
 from gi.repository import Gdk, GLib, GObject, Gtk  # noqa: E402
 
-from phonemessages import app as A  # noqa: E402
+from phonemessages import app as A, links  # noqa: E402
 from phonemessages.store import Store, conv_key  # noqa: E402
 
 out = sys.argv[1]
@@ -58,14 +59,19 @@ add("+15555550103", "Attachment: 1 Image", False, -95)
 add("+15555550102", "Running 10 min late, sorry!", False, -12, read=False)
 
 maya = "+15555550101"
+TRAILHEAD = "https://www.google.com/maps/place/Rattlesnake+Ledge+Trailhead/@47.4347,-121.7686,15z"
 add(maya, "Are we still on for the hike tomorrow?", False, -21)
 add(maya, "Yes! Trailhead at 8?", True, -19)
+add(maya, TRAILHEAD, True, -19)
 add(maya, "Perfect. I found the view we talked about", False, -18)
 add(maya, "Attachment: 1 Image", False, -18)
 add(maya, 'Loved “Attachment: 1 Image”', True, -17)
 add(maya, "That looks amazing 🤩", True, -17)
 add(maya, "Should I bring snacks?", False, -2)
 add(maya, "Definitely. I'll bring coffee ☕", True, -1)
+
+for pinned in (maya, "+15555550102", "+15555550106"):  # Maya, Sam (unread) and Dad
+    store.pin(conv_key(pinned))
 
 Gtk.Settings.get_default().set_property("gtk-application-prefer-dark-theme", True)
 screen = Gdk.Screen.get_default()
@@ -86,6 +92,10 @@ A.paired_devices = lambda: [("00:00:00:00:00:01", "iPhone")]
 app = Gtk.Application(application_id="io.github.ThatSwimmerGuy.LimeScreenshots")
 app.store = store
 app.client = FakeClient()
+app.speller = None  # no spelling underlines in screenshots
+app.previews = links.Previews(os.path.join(A.CACHE_DIR, "link-previews"))
+app.previews.fetch(TRAILHEAD)  # needs the internet; done up front so the card is in the picture
+app.preview_slots = threading.BoundedSemaphore(1)
 shots = []
 hide = []  # widgets the real window keeps hidden, which show_all() would reveal
 

@@ -196,7 +196,7 @@ def test_opening_an_old_database_adds_columns_and_keeps_rows(tmp_path):
     [m] = s.messages("5551234567")
     assert m["text"] == "from an old version"
     assert m["read"] == 1  # existing messages count as read
-    assert m["reply_to"] is None and m["reaction"] is None
+    assert m["reply_to"] is None and m["reaction"] is None and m["edit_of"] is None
     assert s.contacts()[0]["name"] == "Jane"
     assert s.contacts()[0]["photo"] is None
     s.db.close()
