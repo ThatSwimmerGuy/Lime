@@ -18,13 +18,19 @@
       from your own number.
     </p>
     <p>
-      No Apple ID, Mac or cloud service is needed. Everything stays between your phone and your computer.
+      No Apple ID, Mac or cloud service is needed. Your messages stay between your phone and
+      your computer. The only time Lime goes online is to show previews of links, which can be
+      turned off in Settings.
     </p>
     <p>Features:</p>
     <ul>
       <li>Read and reply to texts, with desktop notifications for new messages</li>
       <li>Contact names and photos synced from the iPhone, and a contact list for new messages</li>
       <li>Reactions and replies to individual messages</li>
+      <li>Edit messages you've sent</li>
+      <li>Previews of links, such as a map for a Google Maps place</li>
+      <li>Pin your favourite conversations to the top</li>
+      <li>Autocorrect and spell check while you type</li>
       <li>Custom bubble colours and a choice of window-button side</li>
       <li>Reconnects automatically and keeps running in the background for notifications</li>
     </ul>
@@ -81,6 +87,19 @@
   </keywords>
 
   <releases>
+    <release version="1.1.0" date="2026-10-28">
+      <description>
+        <p>New in this version:</p>
+        <ul>
+          <li>Link previews: links show a picture and title, and Google Maps links show a map of the place</li>
+          <li>Pin up to nine conversations to the top of the sidebar</li>
+          <li>Edit messages you've sent; the fix goes out as "*corrected text"</li>
+          <li>Autocorrect and spell check, with suggestions on right-click</li>
+          <li>The message box grows as you type instead of scrolling sideways</li>
+          <li>A new Settings window and a new look for New Message</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.0.0" date="2026-10-20">
       <description>
         <p>First release.</p>
