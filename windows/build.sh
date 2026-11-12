@@ -9,13 +9,18 @@ pacman -S --needed --noconfirm \
     "${MINGW_PACKAGE_PREFIX}-gtk3" \
     "${MINGW_PACKAGE_PREFIX}-python" \
     "${MINGW_PACKAGE_PREFIX}-python-gobject" \
-    "${MINGW_PACKAGE_PREFIX}-python-pyinstaller" \
     "${MINGW_PACKAGE_PREFIX}-adwaita-icon-theme" \
     "${MINGW_PACKAGE_PREFIX}-librsvg" \
     "${MINGW_PACKAGE_PREFIX}-enchant" \
     "${MINGW_PACKAGE_PREFIX}-hunspell-en" \
     "${MINGW_PACKAGE_PREFIX}-ca-certificates" \
     zip
+
+# PyInstaller: MSYS2's package if it has one, else built from source with pip
+if ! pacman -S --needed --noconfirm "${MINGW_PACKAGE_PREFIX}-pyinstaller"; then
+    pacman -S --needed --noconfirm "${MINGW_PACKAGE_PREFIX}-gcc" "${MINGW_PACKAGE_PREFIX}-python-pip"
+    python -m pip install --break-system-packages pyinstaller
+fi
 
 version=$(sed -n 's/.*<release version="\([^"]*\)".*/\1/p' data/io.github.ThatSwimmerGuy.Lime.metainfo.xml | head -1)
 echo "Building Lime $version"
