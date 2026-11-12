@@ -2,8 +2,9 @@
 without BlueZ's obexd (Windows). They offer the same interface as map_client.MapClient and
 contacts.ContactSync, so the app can use either.
 
-The phone has no way to push new-message events to us here (that needs a MAP
-notification server of our own), so new messages are found by polling.
+On Windows Lime also runs the MAP notification server the phone reports new messages to.
+Polling still catches anything the phone doesn't report, and covers Linux testing, where
+BlueZ's obexd owns that server.
 """
 import queue
 import socket
@@ -24,7 +25,7 @@ POLL_SECONDS = 10
 
 # MAP application parameter tags
 MAX_LIST_COUNT, FILTER_PERIOD_BEGIN, SUBJECT_LENGTH = 0x01, 0x04, 0x13
-ATTACHMENT, TRANSPARENT, RETRY, CHARSET = 0x0A, 0x0B, 0x0C, 0x14
+ATTACHMENT, TRANSPARENT, RETRY, NOTIFICATION_STATUS, CHARSET = 0x0A, 0x0B, 0x0C, 0x0E, 0x14
 UTF8 = 1
 
 # PBAP application parameter tags, and the vCard fields Lime uses
@@ -36,7 +37,8 @@ def describe_error(err):
     if isinstance(err, obex.ObexError):
         if "Not Authorized" in str(err) or "Forbidden" in str(err):
             return ("The iPhone refused access. Turn on 'Show Notifications' for this computer "
-                    "in the iPhone's Bluetooth settings.")
+                    "in the iPhone's Bluetooth settings. If that switch isn't there, forget this "
+                    "computer on the iPhone and pair again while Lime is open.")
         return str(err)
     if isinstance(err, (TimeoutError, ConnectionRefusedError)) or getattr(err, "winerror", None) in (
             10060, 10061, 10064, 10065, 10050, 10051):
@@ -108,6 +110,40 @@ class MapClient(GObject.Object):
         self._seen = set()
         self._poll = None
         self._worker = _Worker()
+        self.notifications = False  # whether the phone can report new messages to us
+        try:
+            server = bluetooth.advertise()
+        except OSError as e:
+            print("Lime: couldn't publish the Bluetooth services the iPhone looks for: %s" % e)
+            server = None
+        if server:
+            self.notifications = True
+            threading.Thread(target=self._serve_notifications, args=(server,), daemon=True).start()
+
+    def _serve_notifications(self, server):
+        """Accept the phone's notification connections; each event report triggers a listing."""
+        while True:
+            try:
+                sock = bluetooth.accept(server)
+            except OSError:
+                return
+            def on_put(type_, body):
+                if type_ == "x-bt/MAP-event-report":
+                    self._main(self._on_event)
+            threading.Thread(target=self._serve_one, args=(sock, on_put), daemon=True).start()
+
+    @staticmethod
+    def _serve_one(sock, on_put):
+        try:
+            obex.serve(sock, on_put)
+        except (OSError, obex.ObexError):
+            pass
+        finally:
+            sock.close()
+
+    def _on_event(self):
+        if self.obex:
+            self._list(recent=True)
 
     # -- plumbing ---------------------------------------------------------
 
@@ -181,8 +217,20 @@ class MapClient(GObject.Object):
             return
         self.obex = client
         self._set_state("connected", "")
+        if self.notifications:
+            self._register_notifications(session, client)
         self.refresh()
         self._poll = GLib.timeout_add_seconds(POLL_SECONDS, self._on_poll)
+
+    def _register_notifications(self, session, client):
+        """Ask the phone to report new messages to our notification server."""
+        def run():
+            try:
+                client.put(None, "x-bt/MAP-NotificationRegistration", b"0",
+                           obex.app_params((NOTIFICATION_STATUS, "B", 1)))
+            except obex.ObexError as e:  # polling still works
+                print("Lime: the iPhone won't report new messages: %s" % e)
+        self._job(session, run)
 
     @staticmethod
     def _close(client):

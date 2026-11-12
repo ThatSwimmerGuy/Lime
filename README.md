@@ -115,13 +115,18 @@ Lime also runs on Windows 10 and 11. Download `Lime-<version>-setup.exe` from th
 [Releases](https://github.com/ThatSwimmerGuy/Lime/releases) page and run it (no admin rights
 needed). There's also a portable `.zip` that runs without installing.
 
-To pair the iPhone, open **Settings → Bluetooth & devices → Add device → Bluetooth** on the PC,
-keep the iPhone's **Settings → Bluetooth** screen open, and confirm the code on both. Then
-continue with step 2 below.
+**Open Lime before you pair.** While it runs, Lime tells the iPhone it can show messages and
+contacts, and the iPhone only offers **Show Notifications** and **Sync Contacts** to computers
+that said so when they paired. Then, on the PC, open **Settings → Bluetooth & devices → Add
+device → Bluetooth**, keep the iPhone's **Settings → Bluetooth** screen open, and confirm the
+code on both. Then continue with step 2 below.
+
+If you paired before installing Lime (or before version 1.2.1), the iPhone won't show those
+switches. Forget the PC on the iPhone (**ⓘ → Forget This Device**), remove the iPhone in the
+PC's Bluetooth settings, then pair again with Lime open.
 
 A few things work differently on Windows:
 
-- New messages are checked for every 10 seconds instead of arriving instantly.
 - Clicking a notification opens Lime at the newest chat, not necessarily that message's chat.
 - Microsoft Phone Link and Lime can't both be connected to the iPhone. Quit Phone Link (or
   turn off its iPhone link) before connecting Lime.
@@ -207,6 +212,9 @@ These come from how the iPhone shares messages over Bluetooth, not from Lime:
 - **Connected, but no messages arrive.** Check that **Show Notifications** is on for your
   computer in the iPhone's Bluetooth settings, then press Disconnect and Connect.
 - **Numbers instead of names.** Turn on **Sync Contacts** in the same place, then reconnect.
+- **Windows: no Show Notifications switch on the iPhone.** The iPhone was paired before Lime
+  was running. Forget the PC on the iPhone, remove the iPhone from the PC's Bluetooth
+  settings, open Lime, and pair again.
 - **"org.bluez.obex" errors.** The OBEX service isn't installed or running. Install
   `bluez-obex` (Arch) or `bluez-obexd` (Debian/Ubuntu/Fedora) and log out and back in.
 

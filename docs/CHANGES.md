@@ -431,12 +431,24 @@ thread, and their results come back to the GTK main loop with `GLib.idle_add`. T
 store's SQLite connection belongs to the main thread, so the "do we already have this
 message?" check stays on the main thread too.
 
-### Why messages are polled
+### Why Lime publishes Bluetooth services on Windows (1.2.1)
 
-With obexd, the iPhone announces new messages through a MAP notification server that obexd
-runs. Lime on Windows would have to register its own Bluetooth service for that, which is a
-lot more Winsock code. Instead it lists the last day of messages every 10 seconds and fetches
-only the ones it doesn't have yet.
+The first Windows release couldn't connect: the iPhone answered "Not Authorized", and its
+Bluetooth settings for the PC had no **Show Notifications** switch. The iPhone only offers
+that switch (and **Sync Contacts**) to a computer whose SDP records, the list of services a
+Bluetooth device publishes, include a MAP notification server and a PBAP client. On Linux,
+BlueZ publishes both, which is why it worked there. Windows publishes neither.
+
+So Lime now publishes them itself while it runs (`bluetooth.advertise`). It builds the two SDP
+records byte by byte, modelled on BlueZ's, and registers them with Winsock's
+`WSASetService`. The iPhone reads a computer's records when pairing, so a PC paired before
+this needs to be paired again with Lime open.
+
+The notification server is real, not just a record. It listens on an RFCOMM channel, and after
+connecting Lime sends the iPhone a `SetNotificationRegistration` request. The iPhone then
+connects back and PUTs an event report for each new message (`obex.serve` answers it), and Lime
+lists and fetches straight away. Polling every 10 seconds stays as a fallback, and is still
+what's used on Linux with `LIME_NATIVE_BLUETOOTH=1`, where obexd owns the notification server.
 
 ### Other Windows differences
 

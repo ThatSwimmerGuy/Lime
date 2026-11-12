@@ -51,12 +51,19 @@ if len(sys.argv) == 3 and sys.argv[1] == "--self-test":
         bluetooth = "ok"
     except OSError as e:
         bluetooth = str(e)
+    from phonemessages import bluetooth as bt
+    try:
+        bt.advertise().close()
+        advertise = "ok"
+    except OSError as e:
+        advertise = str(e)
     with open(sys.argv[2], "w") as f:
         f.write("gtk %d.%d\n" % (Gtk.get_major_version(), Gtk.get_minor_version()))
         f.write("client %s\n" % app.MapClient.__module__)
         f.write("spelling %s\n" % (speller.language if speller else "missing"))
         f.write("enchant %s\nfiles %s\n" % ("; ".join(enchant), ", ".join(found)))
         f.write("bluetooth sockets %s\n" % bluetooth)
+        f.write("advertise %s\n" % advertise)
     sys.exit(0)
 
 from phonemessages.app import main  # noqa: E402

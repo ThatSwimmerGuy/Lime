@@ -1,7 +1,8 @@
-"""A small OBEX client (the protocol under Bluetooth MAP and PBAP), for systems without
-BlueZ's obexd. It runs over any connected stream socket, such as an RFCOMM one.
+"""A small OBEX client and server (the protocol under Bluetooth MAP and PBAP), for systems
+without BlueZ's obexd. It runs over any connected stream socket, such as an RFCOMM one.
 
-Only what Lime needs: CONNECT with a target, GET, PUT, SETPATH and DISCONNECT.
+Only what Lime needs: as a client CONNECT with a target, GET, PUT, SETPATH and DISCONNECT;
+as a server, accepting the PUTs a phone sends to report new messages.
 """
 import struct
 import uuid
@@ -66,6 +67,61 @@ def decode_headers(data):
     return headers
 
 
+def _recv_exact(sock, n):
+    buf = b""
+    while len(buf) < n:
+        chunk = sock.recv(n - len(buf))
+        if not chunk:
+            raise ConnectionError("The iPhone disconnected.")
+        buf += chunk
+    return buf
+
+
+def read_packet(sock):
+    """(opcode or response code, everything after the length) of the next packet."""
+    code, size = struct.unpack(">BH", _recv_exact(sock, 3))
+    if size < 3:
+        raise ObexError("Malformed packet from the phone.")
+    return code, _recv_exact(sock, size - 3)
+
+
+def serve(sock, on_put, max_packet=0xFFFF):
+    """Answer one OBEX client until it disconnects. on_put(type, body) is called for each
+    finished PUT; that's how a phone delivers MAP event reports."""
+    body, type_ = b"", None
+    while True:
+        try:
+            opcode, data = read_packet(sock)
+        except ConnectionError:
+            return
+
+        def reply(code, headers=(), prefix=b""):
+            payload = b"".join(encode_header(h, v) for h, v in headers)
+            sock.sendall(struct.pack(">BH", code, 3 + len(prefix) + len(payload)) + prefix + payload)
+
+        if opcode == CONNECT:
+            target = dict(decode_headers(data[4:])).get(TARGET)
+            headers = [(CONNECTION_ID, 1)] + ([(WHO, target)] if target else [])
+            reply(SUCCESS, headers, struct.pack(">BBH", 0x10, 0, max_packet))
+        elif opcode in (PUT, PUT | FINAL):
+            for hid, value in decode_headers(data):
+                if hid in (BODY, END_OF_BODY):
+                    body += value
+                elif hid == TYPE:
+                    type_ = value.rstrip(b"\0").decode("ascii", "replace")
+            if opcode & FINAL:
+                reply(SUCCESS)
+                on_put(type_, body)
+                body, type_ = b"", None
+            else:
+                reply(CONTINUE)
+        elif opcode == DISCONNECT:
+            reply(SUCCESS)
+            return
+        else:
+            reply(0xD1)  # Not implemented
+
+
 def app_params(*params):
     """Encode (tag, struct format, value) triples as an Application Parameters body."""
     out = b""
@@ -84,21 +140,11 @@ class Client:
 
     # -- wire ---------------------------------------------------------------
 
-    def _recv_exact(self, n):
-        buf = b""
-        while len(buf) < n:
-            chunk = self.sock.recv(n - len(buf))
-            if not chunk:
-                raise ConnectionError("The iPhone disconnected.")
-            buf += chunk
-        return buf
-
     def _request(self, opcode, headers=(), prefix=b""):
         """Send one packet and return (response code, extra prefix bytes, headers)."""
         body = b"".join(encode_header(h, v) for h, v in headers)
         self.sock.sendall(struct.pack(">BH", opcode, 3 + len(prefix) + len(body)) + prefix + body)
-        code, size = struct.unpack(">BH", self._recv_exact(3))
-        rest = self._recv_exact(size - 3)
+        code, rest = read_packet(self.sock)
         if opcode == CONNECT:  # version, flags and max packet length come before the headers
             return code, rest[:4], decode_headers(rest[4:])
         return code, b"", decode_headers(rest)
@@ -162,8 +208,8 @@ class Client:
             headers = self._with_id([])  # later packets only ask for more
 
     def put(self, name, type_, data, params=b""):
-        """Upload `data`; returns the reply headers (MAP sends the new message's handle in Name)."""
-        headers = [(NAME, name), (TYPE, type_), (LENGTH, len(data))]
+        """Upload `data` (name=None sends no Name header); returns the reply headers."""
+        headers = ([] if name is None else [(NAME, name)]) + [(TYPE, type_), (LENGTH, len(data))]
         if params:
             headers.append((APP_PARAMS, params))
         headers = self._with_id(headers)

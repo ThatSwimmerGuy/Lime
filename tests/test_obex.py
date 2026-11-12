@@ -189,3 +189,88 @@ def test_listing_gives_obexd_style_handles_and_properties():
 def test_garbled_listing_is_empty():
     native = pytest.importorskip("phonemessages.native_client")
     assert native.parse_listing(b"<not xml", "inbox") == []
+
+
+# -- what Lime publishes so the iPhone offers Show Notifications / Sync Contacts --------
+
+@pytest.mark.skipif(sys.platform == "win32", reason="the SDP parser is the Linux code path")
+def test_mns_record_says_map_notification_server_on_our_channel():
+    from phonemessages import bluetooth
+    record, end = bluetooth._data_element(bluetooth.mns_record(7), 0)
+    assert end == len(bluetooth.mns_record(7))
+    attrs = dict(zip(record[::2], record[1::2]))
+    assert attrs[0x0001] == [bluetooth.MAP_MNS]
+    assert [0x0003, 7] in attrs[0x0004]  # RFCOMM channel 7
+    assert attrs[0x0009] == [[bluetooth.MAP_PROFILE, 0x0102]]
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="the SDP parser is the Linux code path")
+def test_pce_record_says_phonebook_client():
+    from phonemessages import bluetooth
+    record, _ = bluetooth._data_element(bluetooth.pce_record(), 0)
+    attrs = dict(zip(record[::2], record[1::2]))
+    assert attrs[0x0001] == [bluetooth.PBAP_PCE]
+    assert attrs[0x0009] == [[bluetooth.PBAP_PROFILE, 0x0102]]
+
+
+# -- the notification server (the phone is the client) --------------------------------
+
+class ScriptedClient:
+    """The phone's side of a notification connection: feeds packets, collects replies."""
+
+    def __init__(self, *packets):
+        self.inbox = b"".join(packets)
+        self.sent = b""
+
+    def recv(self, n):
+        data, self.inbox = self.inbox[:n], self.inbox[n:]
+        return data
+
+    def sendall(self, data):
+        self.sent += data
+
+    def replies(self):
+        out, data = [], self.sent
+        while data:
+            code, size = struct.unpack_from(">BH", data)
+            out.append((code, data[3:size]))
+            data = data[size:]
+        return out
+
+
+MNS_TARGET = uuid.UUID("bb582b41-420c-11db-b0de-0800200c9a66").bytes
+
+
+def test_server_accepts_connect_and_collects_event_reports_across_packets():
+    events = []
+    phone = ScriptedClient(
+        packet(obex.CONNECT, (obex.TARGET, MNS_TARGET), prefix=struct.pack(">BBH", 0x10, 0, 0x400)),
+        packet(obex.PUT, (obex.CONNECTION_ID, 1), (obex.TYPE, "x-bt/MAP-event-report"),
+               (obex.BODY, b"<MAP-event-report>")),
+        packet(obex.PUT | obex.FINAL, (obex.END_OF_BODY, b"</MAP-event-report>")),
+        packet(obex.DISCONNECT),
+    )
+    obex.serve(phone, lambda t, b: events.append((t, b)))
+    replies = phone.replies()
+    assert [code for code, _ in replies] == [obex.SUCCESS, obex.CONTINUE, obex.SUCCESS, obex.SUCCESS]
+    connect_headers = dict(obex.decode_headers(replies[0][1][4:]))
+    assert connect_headers[obex.WHO] == MNS_TARGET and obex.CONNECTION_ID in connect_headers
+    assert events == [("x-bt/MAP-event-report", b"<MAP-event-report></MAP-event-report>")]
+
+
+def test_server_stops_quietly_when_the_phone_goes_away():
+    obex.serve(ScriptedClient(packet(obex.CONNECT, prefix=struct.pack(">BBH", 0x10, 0, 0x400))),
+               lambda t, b: None)
+
+
+def test_server_refuses_what_it_doesnt_do():
+    phone = ScriptedClient(packet(obex.GET | obex.FINAL), packet(obex.DISCONNECT))
+    obex.serve(phone, lambda t, b: None)
+    assert [code for code, _ in phone.replies()] == [0xD1, obex.SUCCESS]
+
+
+def test_put_without_name_sends_no_name_header():
+    client, phone = connected(packet(obex.SUCCESS))
+    client.put(None, "x-bt/MAP-NotificationRegistration", b"0", obex.app_params((0x0E, "B", 1)))
+    hids = [h for h, _ in obex.decode_headers(phone.sent[1][3:])]
+    assert obex.NAME not in hids and obex.TYPE in hids

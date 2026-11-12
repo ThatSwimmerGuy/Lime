@@ -87,6 +87,15 @@
   </keywords>
 
   <releases>
+    <release version="1.2.1" date="2026-11-12">
+      <description>
+        <p>Windows fixes:</p>
+        <ul>
+          <li>The iPhone now offers Show Notifications and Sync Contacts for Windows PCs (pair again with Lime open)</li>
+          <li>New messages arrive straight away on Windows instead of every 10 seconds</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.2.0" date="2026-11-12">
       <description>
         <p>New in this version:</p>
