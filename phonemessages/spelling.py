@@ -145,6 +145,11 @@ class Speller:
         lib.enchant_dict_suggest.restype = ctypes.POINTER(ctypes.c_char_p)
         lib.enchant_dict_free_string_list.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_char_p)]
         lib.enchant_dict_add.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_ssize_t]
+        prefix = os.environ.get("LIME_ENCHANT_PREFIX")
+        if prefix and hasattr(lib, "enchant_set_prefix_dir"):
+            # a bundled Enchant (Windows) would look for its plugins where it was built
+            lib.enchant_set_prefix_dir.argtypes = [ctypes.c_char_p]
+            lib.enchant_set_prefix_dir(prefix.encode())
         broker = lib.enchant_broker_init()
         if not broker:
             return None

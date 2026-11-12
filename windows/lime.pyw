@@ -8,6 +8,7 @@ if getattr(sys, "frozen", False):  # inside the PyInstaller bundle
     if os.path.exists(certs):  # for link previews over https
         os.environ.setdefault("SSL_CERT_FILE", certs)
     os.environ.setdefault("XDG_DATA_DIRS", os.path.join(here, "share"))
+    os.environ.setdefault("LIME_ENCHANT_PREFIX", here)  # its plugins and dictionaries
 
 if len(sys.argv) == 3 and sys.argv[1] == "--self-test":
     # used by the CI build: check the bundle has everything, without opening a window
@@ -28,6 +29,7 @@ if len(sys.argv) == 3 and sys.argv[1] == "--self-test":
     try:  # which plugins and dictionaries Enchant itself sees
         lib = ctypes.CDLL("libenchant-2-2.dll")
         lib.enchant_broker_init.restype = ctypes.c_void_p
+        lib.enchant_set_prefix_dir(os.environ.get("LIME_ENCHANT_PREFIX", "").encode())
         broker = ctypes.c_void_p(lib.enchant_broker_init())
         seen = []
         describe = ctypes.CFUNCTYPE(None, ctypes.c_char_p, ctypes.c_char_p, ctypes.c_char_p, ctypes.c_void_p)(
