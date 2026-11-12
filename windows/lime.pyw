@@ -25,9 +25,24 @@ if len(sys.argv) == 3 and sys.argv[1] == "--self-test":
             enchant.append(name + " loads")
         except OSError as e:
             enchant.append("%s: %s" % (name, e))
+    try:  # which plugins and dictionaries Enchant itself sees
+        lib = ctypes.CDLL("libenchant-2-2.dll")
+        lib.enchant_broker_init.restype = ctypes.c_void_p
+        broker = ctypes.c_void_p(lib.enchant_broker_init())
+        seen = []
+        describe = ctypes.CFUNCTYPE(None, ctypes.c_char_p, ctypes.c_char_p, ctypes.c_char_p, ctypes.c_void_p)(
+            lambda name, desc, path, data: seen.append("plugin " + name.decode()))
+        lib.enchant_broker_describe(broker, describe, None)
+        dicts = ctypes.CFUNCTYPE(None, ctypes.c_char_p, ctypes.c_char_p, ctypes.c_char_p, ctypes.c_char_p,
+                                 ctypes.c_void_p)(lambda tag, name, desc, path, data: seen.append("dict " + tag.decode()))
+        lib.enchant_broker_list_dicts(broker, dicts, None)
+        enchant.append(", ".join(seen) or "no plugins")
+    except (OSError, AttributeError) as e:
+        enchant.append(str(e))
     here = getattr(sys, "_MEIPASS", os.path.dirname(sys.executable))
     found = [os.path.relpath(f, here) for f in glob.glob(os.path.join(here, "**", "*enchant*"), recursive=True)
-             + glob.glob(os.path.join(here, "**", "en_US.*"), recursive=True)]
+             + glob.glob(os.path.join(here, "**", "en_US.*"), recursive=True)
+             + glob.glob(os.path.join(here, "**", "*hunspell*.dll"), recursive=True)]
     try:  # build machines usually have no Bluetooth, so this is only reported
         socket.socket(getattr(socket, "AF_BLUETOOTH", 32), socket.SOCK_STREAM,
                       getattr(socket, "BTPROTO_RFCOMM", 3)).close()
