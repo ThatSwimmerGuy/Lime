@@ -11,13 +11,26 @@ import gi
 
 gi.require_version("Gtk", "3.0")
 gi.require_version("GdkPixbuf", "2.0")
-gi.require_version("Notify", "0.7")
-from gi.repository import Gio, GLib, GObject, Gtk, Gdk, GdkPixbuf, Notify, Pango  # noqa: E402
+from gi.repository import Gio, GLib, GObject, Gtk, Gdk, GdkPixbuf, Pango  # noqa: E402
 
 from . import edits, links, reactions, spelling  # noqa: E402
-from .contacts import ContactSync  # noqa: E402
-from .map_client import MapClient, paired_devices  # noqa: E402
 from .store import MAX_PINS, Store, conv_key  # noqa: E402
+
+WINDOWS = sys.platform == "win32"
+if WINDOWS or os.environ.get("LIME_NATIVE_BLUETOOTH"):
+    # no BlueZ obexd: speak MAP and PBAP over our own RFCOMM sockets
+    from . import windows  # noqa: E402
+    from .bluetooth import paired_devices  # noqa: E402
+    from .native_client import ContactSync, MapClient  # noqa: E402
+else:
+    from .contacts import ContactSync  # noqa: E402
+    from .map_client import MapClient, paired_devices  # noqa: E402
+
+if WINDOWS:
+    Notify = None
+else:
+    gi.require_version("Notify", "0.7")
+    from gi.repository import Notify  # noqa: E402
 
 APP_ID = "io.github.ThatSwimmerGuy.Lime"
 DATA_DIR = os.path.join(GLib.get_user_data_dir(), "phone-messages")
@@ -1740,15 +1753,19 @@ class SettingsWindow(Gtk.Window):
 
 class App(Gtk.Application):
     def __init__(self):
-        super().__init__(application_id=APP_ID, flags=Gio.ApplicationFlags.DEFAULT_FLAGS)
+        # on Windows there's no D-Bus to make Lime unique; windows.SingleInstance does it
+        flags = Gio.ApplicationFlags.NON_UNIQUE if WINDOWS else Gio.ApplicationFlags.DEFAULT_FLAGS
+        super().__init__(application_id=APP_ID, flags=flags)
         self.window = None
         self.notifications = []  # notification actions only fire while referenced
+        self.last_notified = None  # Windows toasts can't say which chat they were for
 
     def do_startup(self):
         Gtk.Application.do_startup(self)
         os.makedirs(DATA_DIR, exist_ok=True)
         os.makedirs(CACHE_DIR, exist_ok=True)
-        Notify.init("Lime")
+        if Notify:
+            Notify.init("Lime")
         Gtk.Settings.get_default().set_property("gtk-application-prefer-dark-theme", True)
         provider = Gtk.CssProvider()
         provider.load_from_data(CSS)
@@ -1837,12 +1854,23 @@ class App(Gtk.Application):
         viewing = self.window and self.window.is_active() and self.window.current_conv == conv
         if not m["outgoing"] and recent and not viewing:
             title = self.store.contact_name(m["address"]) or m["name"] or m["address"]
+            if WINDOWS:
+                self.last_notified = conv
+                windows.notify(APP_ID, title, plain_text(m["text"]), self.store.contact_photo(m["address"]))
+                return
             icon = self.store.contact_photo(m["address"]) or "mail-message-new"
             note = Notify.Notification.new(title, plain_text(m["text"]), icon)
             note.add_action("default", "Open", self.on_notification_clicked, conv)
             note.connect("closed", lambda n: self.notifications.remove(n))
             self.notifications.append(note)
             note.show()
+
+    def on_remote_activate(self):
+        """Another copy of Lime was started (or a toast clicked): show the latest notified chat."""
+        self.activate()
+        conv, self.last_notified = self.last_notified, None
+        if conv:
+            self.on_notification_clicked(None, None, conv)
 
     def on_notification_clicked(self, note, action, conv):
         self.activate()
@@ -1855,7 +1883,14 @@ def main():
     GLib.set_prgname(APP_ID)
     GLib.set_application_name("Lime")
     Gtk.Window.set_default_icon_name(APP_ID)
+    if WINDOWS:
+        windows.set_app_id(APP_ID)
+        instance = windows.SingleInstance(os.path.join(DATA_DIR, "instance-port"))
+        if instance.hand_over():
+            return 0
     app = App()
+    if WINDOWS:
+        instance.listen(app.on_remote_activate)
     quit_action = Gio.SimpleAction.new("quit", None)
     quit_action.connect("activate", lambda *a: app.quit())
     app.add_action(quit_action)

@@ -50,6 +50,29 @@ def paired_devices():
     return [(addr, name) for _, name, addr in sorted(devices)]
 
 
+def make_message(handle, props, data, ts):
+    """The message dict both clients emit, from obexd-style properties and the bMessage."""
+    parsed = bmessage.parse(data) if data else {}
+    folder = (props.get("Folder") or parsed.get("folder") or "").lower()
+    outgoing = "sent" in folder or "outbox" in folder or bool(props.get("Sent") and "inbox" not in folder)
+    if outgoing:
+        address = props.get("RecipientAddress") or parsed.get("recipient_address") or ""
+        name = props.get("Recipient") or parsed.get("recipient_name") or ""
+    else:
+        address = props.get("SenderAddress") or parsed.get("sender_address") or ""
+        name = props.get("Sender") or parsed.get("sender_name") or ""
+    if name == address:
+        name = ""
+    return {
+        "handle": handle,
+        "address": address or name or "Unknown",
+        "name": name,
+        "outgoing": outgoing,
+        "text": parsed.get("text") or props.get("Subject") or "",
+        "ts": ts or time.time(),
+    }
+
+
 class MapClient(GObject.Object):
     __gsignals__ = {
         # state ("disconnected" / "connecting" / "connected"), detail text
@@ -247,34 +270,13 @@ class MapClient(GObject.Object):
                 if os.path.exists(target):
                     os.unlink(target)
                 if data or props.get("Subject"):
-                    self.emit("message-received", self._make_message(handle, props, data, ts))
+                    self.emit("message-received", make_message(handle, props, data, ts))
                 next_one()
 
             self._call(path, MSG_IFACE, "Get", ("(sb)", (target, False)),
                        lambda v, e: self._wait_transfer(v, e, finished, timeout=30))
 
         self._call(path, PROPS_IFACE, "GetAll", ("(s)", (MSG_IFACE,)), on_props)
-
-    def _make_message(self, handle, props, data, ts):
-        parsed = bmessage.parse(data) if data else {}
-        folder = (props.get("Folder") or parsed.get("folder") or "").lower()
-        outgoing = "sent" in folder or "outbox" in folder or bool(props.get("Sent") and "inbox" not in folder)
-        if outgoing:
-            address = props.get("RecipientAddress") or parsed.get("recipient_address") or ""
-            name = props.get("Recipient") or parsed.get("recipient_name") or ""
-        else:
-            address = props.get("SenderAddress") or parsed.get("sender_address") or ""
-            name = props.get("Sender") or parsed.get("sender_name") or ""
-        if name == address:
-            name = ""
-        return {
-            "handle": handle,
-            "address": address or name or "Unknown",
-            "name": name,
-            "outgoing": outgoing,
-            "text": parsed.get("text") or props.get("Subject") or "",
-            "ts": ts or time.time(),
-        }
 
     # -- sending ----------------------------------------------------------
 

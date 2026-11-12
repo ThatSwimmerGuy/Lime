@@ -109,6 +109,27 @@ This adds Lime and its icon to your app menu, for your user only (no `sudo` need
 To remove it again, run `./install.sh --uninstall`. You can also skip this step and start
 Lime directly with `./phone-messages`.
 
+### Windows
+
+Lime also runs on Windows 10 and 11. Download `Lime-<version>-setup.exe` from the
+[Releases](https://github.com/ThatSwimmerGuy/Lime/releases) page and run it (no admin rights
+needed). There's also a portable `.zip` that runs without installing.
+
+To pair the iPhone, open **Settings → Bluetooth & devices → Add device → Bluetooth** on the PC,
+keep the iPhone's **Settings → Bluetooth** screen open, and confirm the code on both. Then
+continue with step 2 below.
+
+A few things work differently on Windows:
+
+- New messages are checked for every 10 seconds instead of arriving instantly.
+- Clicking a notification opens Lime at the newest chat, not necessarily that message's chat.
+- Microsoft Phone Link and Lime can't both be connected to the iPhone. Quit Phone Link (or
+  turn off its iPhone link) before connecting Lime.
+
+To build the Windows version yourself, install [MSYS2](https://www.msys2.org), open its
+**UCRT64** shell and run `./windows/build.sh` in this repository. GitHub also builds it for
+every push.
+
 ## Set up your iPhone (one time)
 
 1. **Pair the iPhone with your computer.** The easiest way is your desktop's Bluetooth
@@ -157,6 +178,8 @@ Everything is stored locally on your computer:
 - Contact photos: `~/.local/share/phone-messages/avatars/`
 - Settings: `~/.config/phone-messages/config.json`
 
+On Windows, all three are in `%LOCALAPPDATA%\phone-messages\`.
+
 The Flatpak keeps its own copy of these under `~/.var/app/io.github.ThatSwimmerGuy.Lime/`.
 
 ## Limitations
@@ -201,11 +224,16 @@ phonemessages/
   app.py                window, sidebar, chat view, settings
   map_client.py         Bluetooth MAP connection to the iPhone (via BlueZ over D-Bus)
   contacts.py           phone book sync over Bluetooth PBAP
+  native_client.py      MAP and PBAP without BlueZ (used on Windows), over obex.py
+  obex.py               the OBEX protocol MAP and PBAP are built on
+  bluetooth.py          paired devices and RFCOMM sockets on Windows (and Linux, for testing)
+  windows.py            Windows notifications and single-instance handling
   bmessage.py           reading and writing the bMessage format MAP uses
   reactions.py          tapback reactions sent and received as text
   edits.py              editing sent messages (sent as "*corrected text")
   spelling.py           autocorrect and spell check (Enchant)
   store.py              local SQLite message history
+windows/                Windows build: PyInstaller recipe, installer script, build.sh
 tests/                  unit tests (pytest)
 docs/CHANGES.md         what changed and why, phase by phase
 ```
@@ -220,6 +248,10 @@ Lime's tests use [pytest](https://pytest.org). Install it:
 
 Then run `pytest` from the repository folder. The tests don't need Bluetooth, an iPhone or a
 display. They also run on GitHub for every push.
+
+To try the Windows Bluetooth code on Linux, start Lime with `LIME_NATIVE_BLUETOOTH=1 ./phone-messages`.
+It then talks to the iPhone itself instead of going through obexd. Quit any other copy of Lime
+first, because the iPhone only accepts one message connection at a time.
 
 ## License
 

@@ -127,9 +127,13 @@ class Speller:
 
     @classmethod
     def load(cls, languages=None):
-        try:
-            lib = ctypes.CDLL("libenchant-2.so.2")
-        except OSError:
+        for name in ("libenchant-2.so.2", "libenchant-2-2.dll", "libenchant-2.dll"):  # Linux, Windows
+            try:
+                lib = ctypes.CDLL(name)
+                break
+            except OSError:
+                continue
+        else:
             return None
         lib.enchant_broker_init.restype = ctypes.c_void_p
         lib.enchant_broker_dict_exists.argtypes = [ctypes.c_void_p, ctypes.c_char_p]

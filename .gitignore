@@ -5,3 +5,8 @@ build-dir/
 repo/
 .venv/
 .pytest_cache/
+build/
+dist/
+windows/build/
+Lime-*-portable.zip
+Lime-*-setup.exe

@@ -87,6 +87,14 @@
   </keywords>
 
   <releases>
+    <release version="1.2.0" date="2026-11-12">
+      <description>
+        <p>New in this version:</p>
+        <ul>
+          <li>Lime now also runs on Windows 10 and 11, with an installer and a portable version</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.1.0" date="2026-10-28">
       <description>
         <p>New in this version:</p>

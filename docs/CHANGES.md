@@ -403,3 +403,57 @@ The store listing (`data/…metainfo.xml`) gets a 1.1.0 release entry listing th
 and the new features are added to its feature list. Its privacy sentence said everything stays
 between the phone and the computer; with link previews that's no longer exactly true, so it now
 says link previews are the one thing that goes online, and that they can be turned off.
+
+## Extra: Windows version
+
+Lime now also runs on Windows. The window and everything in it are the same GTK code; what
+changed is how Lime talks to the iPhone.
+
+### Why Bluetooth needed new code
+
+On Linux, Lime doesn't speak Bluetooth MAP itself. BlueZ's `obexd` does, and Lime asks it to
+over D-Bus ("list the inbox", "push this message"). Windows has nothing like obexd: there's no
+built-in MAP client to ask. So Lime now has its own:
+
+- `obex.py` is OBEX, the small request/reply protocol both MAP (messages) and PBAP (contacts)
+  run on. A request is a packet of typed headers (Name, Type, Body, …); long replies come back
+  in several packets, each answered with "continue" until the last one says "success".
+- `bluetooth.py` opens the RFCOMM socket OBEX runs over. A service like MAP sits on a numbered
+  RFCOMM channel that you look up with SDP. On Windows, Winsock does the lookup itself when
+  given the service's UUID. Python's `socket.connect` can't pass a UUID, so Lime calls Winsock's
+  `connect` through ctypes. On Linux it asks the phone's SDP server directly, which is only
+  used for testing the Windows code on Linux.
+- `native_client.py` is MAP and PBAP on top of those, with the same signals and methods as
+  `map_client.MapClient` and `contacts.ContactSync`, so `app.py` just picks one at startup.
+
+OBEX allows one request at a time, so all of a connection's requests go through one worker
+thread, and their results come back to the GTK main loop with `GLib.idle_add`. The message
+store's SQLite connection belongs to the main thread, so the "do we already have this
+message?" check stays on the main thread too.
+
+### Why messages are polled
+
+With obexd, the iPhone announces new messages through a MAP notification server that obexd
+runs. Lime on Windows would have to register its own Bluetooth service for that, which is a
+lot more Winsock code. Instead it lists the last day of messages every 10 seconds and fetches
+only the ones it doesn't have yet.
+
+### Other Windows differences
+
+- **Notifications** are Windows toasts, shown through PowerShell so no extra library is
+  needed. The installer gives the Start menu shortcut Lime's app ID; that's what lets toasts
+  show as "Lime" instead of "Windows PowerShell".
+- **One running copy.** On Linux, `Gtk.Application` makes sure only one Lime runs, using
+  D-Bus. On Windows the first copy listens on a localhost port, and starting Lime again just
+  tells that copy to show its window. That matters because closing the window keeps Lime
+  running in the background.
+- **Spell check** loads Enchant by its Windows DLL name too.
+
+### How it's built
+
+`windows/build.sh` runs in MSYS2, which provides GTK, PyGObject and Enchant for Windows.
+PyInstaller bundles Python and those libraries into `dist/Lime`, and Inno Setup turns that
+into an installer. The `Windows build` GitHub workflow does this for every push and attaches
+the installer to a release when a `v*` tag is pushed. Before uploading, it runs the bundled
+`Lime.exe --self-test`, which checks that GTK, the native Bluetooth client and spell check
+all load.
