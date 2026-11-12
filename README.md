@@ -9,7 +9,8 @@ iPhone over Bluetooth using the Message Access Profile (MAP), the same feature c
 stereos and Microsoft Phone Link use. **The iPhone itself sends every message**,
 so it goes out as an iMessage or SMS from your number, as if you'd typed it on the phone.
 
-No Apple ID, no Mac, no cloud service: everything stays between your phone and your computer.
+No Apple ID, no Mac, no cloud service: your messages stay between your phone and your computer.
+(The only time Lime goes online is to fetch link previews, which you can turn off.)
 
 ## Features
 
@@ -17,7 +18,17 @@ No Apple ID, no Mac, no cloud service: everything stays between your phone and y
 - **Your contacts.** Lime syncs the iPhone's phone book, so chats show names and photos. The
   new-message window lists all your contacts to pick from.
 - **Reactions and replies.** Right-click a message to react (❤️ 👍 👎 😂 ‼️ ❓) or reply to it.
+- **Edit what you sent.** Right-click one of your messages and choose **Edit**. The fix goes out
+  as `*corrected text`, and on your computer the original bubble updates and is marked **Edited**.
+- **Autocorrect and spell check,** like on a Mac. Typos are fixed when you finish a word; press
+  Backspace right away to undo a fix. Misspelled words get a red underline, and right-clicking one
+  offers suggestions and **Learn Spelling**. Both can be turned off in Settings.
 - **Delete chats.** Right-click a chat in the sidebar to remove it from your computer.
+- **Pin conversations.** Right-click a chat and choose **Pin** to keep it at the top of the sidebar
+  as a big picture, like in Messages. Up to nine can be pinned; right-click one to unpin it.
+- **Link previews.** A link, such as a Google Maps place or a YouTube video, shows as a card with a
+  picture and title, as on the iPhone. Click it to open the link. Links you receive are only
+  previewed when they come from one of your contacts. Turn previews off in Settings.
 - **Make it yours.** Under Settings (⚙), choose your own bubble and text colours, and
   whether the window buttons sit on the left (Mac style) or the right.
 - **Stays connected.** Lime reconnects on its own when the iPhone comes back in range, and
@@ -29,6 +40,7 @@ No Apple ID, no Mac, no cloud service: everything stays between your phone and y
 - Linux with a Bluetooth adapter
 - Python 3 with GTK 3 (PyGObject) and libnotify
 - BlueZ with its OBEX service (`obexd`)
+- Optional, for autocorrect and spell check: the Enchant library and a Hunspell dictionary
 - An iPhone
 
 ## Install
@@ -56,20 +68,23 @@ make sure Bluetooth is running with `sudo systemctl enable --now bluetooth`.
 **Arch / Manjaro**
 
 ```sh
-sudo pacman -S --needed python-gobject gtk3 libnotify bluez bluez-utils bluez-obex
+sudo pacman -S --needed python-gobject gtk3 libnotify bluez bluez-utils bluez-obex enchant hunspell-en_us
 ```
 
 **Debian / Ubuntu / Linux Mint**
 
 ```sh
-sudo apt install python3-gi gir1.2-gtk-3.0 gir1.2-notify-0.7 bluez bluez-obexd
+sudo apt install python3-gi gir1.2-gtk-3.0 gir1.2-notify-0.7 bluez bluez-obexd libenchant-2-2 hunspell-en-us
 ```
 
 **Fedora**
 
 ```sh
-sudo dnf install python3-gobject gtk3 libnotify bluez bluez-obexd
+sudo dnf install python3-gobject gtk3 libnotify bluez bluez-obexd enchant2 hunspell-en-US
 ```
+
+For spell checking in another language, also install that language's Hunspell dictionary
+(for example `hunspell-de` on Arch). Lime picks the dictionary that matches your system language.
 
 Then make sure Bluetooth is running:
 
@@ -93,6 +108,27 @@ cd Lime
 This adds Lime and its icon to your app menu, for your user only (no `sudo` needed).
 To remove it again, run `./install.sh --uninstall`. You can also skip this step and start
 Lime directly with `./phone-messages`.
+
+### Windows
+
+Lime also runs on Windows 10 and 11. Download `Lime-<version>-setup.exe` from the
+[Releases](https://github.com/ThatSwimmerGuy/Lime/releases) page and run it (no admin rights
+needed). There's also a portable `.zip` that runs without installing.
+
+To pair the iPhone, open **Settings → Bluetooth & devices → Add device → Bluetooth** on the PC,
+keep the iPhone's **Settings → Bluetooth** screen open, and confirm the code on both. Then
+continue with step 2 below.
+
+A few things work differently on Windows:
+
+- New messages are checked for every 10 seconds instead of arriving instantly.
+- Clicking a notification opens Lime at the newest chat, not necessarily that message's chat.
+- Microsoft Phone Link and Lime can't both be connected to the iPhone. Quit Phone Link (or
+  turn off its iPhone link) before connecting Lime.
+
+To build the Windows version yourself, install [MSYS2](https://www.msys2.org), open its
+**UCRT64** shell and run `./windows/build.sh` in this repository. GitHub also builds it for
+every push.
 
 ## Set up your iPhone (one time)
 
@@ -125,6 +161,8 @@ Lime directly with `./phone-messages`.
 | Open a chat | Click it in the sidebar |
 | Start a new chat | Click ✏️, then pick a contact or type a number (with country code) or iMessage email |
 | React or reply to a message | Right-click the message |
+| Edit a message you sent | Right-click it → **Edit**, change the text, press Enter (Esc cancels) |
+| See what an edited message said before | Click **Edited** under it |
 | Delete a chat | Right-click it in the sidebar → **Delete Conversation…** |
 | Change colours or window-button side | Click ⚙ (Settings) |
 | Search chats | Type in the search box above the chat list |
@@ -140,6 +178,8 @@ Everything is stored locally on your computer:
 - Contact photos: `~/.local/share/phone-messages/avatars/`
 - Settings: `~/.config/phone-messages/config.json`
 
+On Windows, all three are in `%LOCALAPPDATA%\phone-messages\`.
+
 The Flatpak keeps its own copy of these under `~/.var/app/io.github.ThatSwimmerGuy.Lime/`.
 
 ## Limitations
@@ -154,6 +194,9 @@ These come from how the iPhone shares messages over Bluetooth, not from Lime:
   Sending pictures isn't possible either.
 - **Reactions are sent as text.** Bluetooth can't send real iMessage tapbacks, so a reaction
   arrives as a line such as `Loved "How was your day?"`. Lime shows incoming ones as badges.
+- **Edits are sent as a new message.** Bluetooth can't change a message that has already been
+  sent, so the other person gets the correction as a new text starting with `*`. Edits other
+  people make on their iPhone don't reach Lime.
 - **Group chats.** Replies go to the person, not the group.
 - **Range.** The phone must be within Bluetooth range (about 10 m).
 
@@ -181,10 +224,34 @@ phonemessages/
   app.py                window, sidebar, chat view, settings
   map_client.py         Bluetooth MAP connection to the iPhone (via BlueZ over D-Bus)
   contacts.py           phone book sync over Bluetooth PBAP
+  native_client.py      MAP and PBAP without BlueZ (used on Windows), over obex.py
+  obex.py               the OBEX protocol MAP and PBAP are built on
+  bluetooth.py          paired devices and RFCOMM sockets on Windows (and Linux, for testing)
+  windows.py            Windows notifications and single-instance handling
   bmessage.py           reading and writing the bMessage format MAP uses
   reactions.py          tapback reactions sent and received as text
+  edits.py              editing sent messages (sent as "*corrected text")
+  spelling.py           autocorrect and spell check (Enchant)
   store.py              local SQLite message history
+windows/                Windows build: PyInstaller recipe, installer script, build.sh
+tests/                  unit tests (pytest)
+docs/CHANGES.md         what changed and why, phase by phase
 ```
+
+## Development
+
+Lime's tests use [pytest](https://pytest.org). Install it:
+
+- **Arch / Manjaro:** `sudo pacman -S python-pytest`
+- **Debian / Ubuntu / Linux Mint:** `sudo apt install python3-pytest`
+- **Fedora:** `sudo dnf install python3-pytest`
+
+Then run `pytest` from the repository folder. The tests don't need Bluetooth, an iPhone or a
+display. They also run on GitHub for every push.
+
+To try the Windows Bluetooth code on Linux, start Lime with `LIME_NATIVE_BLUETOOTH=1 ./phone-messages`.
+It then talks to the iPhone itself instead of going through obexd. Quit any other copy of Lime
+first, because the iPhone only accepts one message connection at a time.
 
 ## License
 

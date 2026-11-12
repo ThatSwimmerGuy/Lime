@@ -6,6 +6,8 @@ import re
 import sqlite3
 import time
 
+MAX_PINS = 9  # as in Messages: three rows of three
+
 
 def conv_key(address):
     """Group "+1 (555) 123-4567" and "5551234567" into one conversation."""
@@ -39,11 +41,15 @@ class Store:
         self.db.execute("CREATE TABLE IF NOT EXISTS contacts (key TEXT PRIMARY KEY, name TEXT NOT NULL)")
         # phone messages the user deleted, so they aren't fetched again when the iPhone relists them
         self.db.execute("CREATE TABLE IF NOT EXISTS deleted (handle TEXT NOT NULL, ts REAL NOT NULL)")
+        # conversations pinned to the top of the sidebar, left to right in `position` order
+        self.db.execute("CREATE TABLE IF NOT EXISTS pins (conv TEXT PRIMARY KEY, position INTEGER NOT NULL)")
         columns = [r["name"] for r in self.db.execute("PRAGMA table_info(messages)")]
         if "reply_to" not in columns:  # databases from before replies existed
             self.db.execute("ALTER TABLE messages ADD COLUMN reply_to INTEGER")
         if "reaction" not in columns:
             self.db.execute("ALTER TABLE messages ADD COLUMN reaction TEXT")
+        if "edit_of" not in columns:  # id of the message an edit corrects
+            self.db.execute("ALTER TABLE messages ADD COLUMN edit_of INTEGER")
         if "read" not in columns:  # existing messages count as already read
             self.db.execute("ALTER TABLE messages ADD COLUMN read INTEGER NOT NULL DEFAULT 1")
         contact_columns = [r["name"] for r in self.db.execute("PRAGMA table_info(contacts)")]
@@ -68,7 +74,7 @@ class Store:
         return row is not None
 
     def add(self, address, text, outgoing, name="", ts=None, handle=None, status=None, reply_to=None,
-            reaction=None):
+            reaction=None, edit_of=None):
         """Insert a message; returns its id, or None if it was already stored."""
         ts = ts or time.time()
         conv = conv_key(address)
@@ -83,9 +89,9 @@ class Store:
         try:
             cur = self.db.execute(
                 "INSERT INTO messages (conv, address, name, outgoing, text, ts, handle, status, dedupe,"
-                " reply_to, read, reaction) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                " reply_to, read, reaction, edit_of) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (conv, address, name or "", int(outgoing), text, ts, handle, status, dedupe,
-                 reply_to, int(outgoing), reaction),
+                 reply_to, int(outgoing), reaction, edit_of),
             )
         except sqlite3.IntegrityError:
             return None
@@ -118,6 +124,27 @@ class Store:
 
     def delete_conversation(self, conv):
         self._delete("conv = ?", (conv,))
+        self.unpin(conv)
+
+    def pinned(self):
+        """Pinned conversation keys, in the order they were pinned."""
+        return [r["conv"] for r in self.db.execute("SELECT conv FROM pins ORDER BY position")]
+
+    def pin(self, conv):
+        """Pin a conversation after the others; returns False if MAX_PINS are already pinned."""
+        pins = self.pinned()
+        if conv in pins:
+            return True
+        if len(pins) >= MAX_PINS:
+            return False
+        with self.db:
+            self.db.execute("INSERT INTO pins (conv, position) VALUES (?, "
+                            "(SELECT COALESCE(MAX(position), -1) + 1 FROM pins))", (conv,))
+        return True
+
+    def unpin(self, conv):
+        with self.db:
+            self.db.execute("DELETE FROM pins WHERE conv = ?", (conv,))
 
     def delete_message(self, msg_id):
         self._delete("id = ?", (msg_id,))

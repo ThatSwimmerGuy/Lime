@@ -1,0 +1,47 @@
+name: Windows build
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+      - name: Install Inno Setup
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "C:\Program Files (x86)\Inno Setup 6\ISCC.exe")) { choco install innosetup -y --no-progress }
+      - name: Build
+        run: ./windows/build.sh
+      - name: Check the bundle
+        run: |
+          ./dist/Lime/Lime.exe --self-test self-test.txt &
+          for i in $(seq 60); do [ -s self-test.txt ] && break; sleep 1; done
+          cat self-test.txt
+          grep -q "client phonemessages.native_client" self-test.txt
+          grep -q "spelling en" self-test.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Lime-windows
+          path: |
+            Lime-*-setup.exe
+            Lime-*-portable.zip
+      - name: Attach to the release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            Lime-*-setup.exe
+            Lime-*-portable.zip
