@@ -11,12 +11,23 @@ if getattr(sys, "frozen", False):  # inside the PyInstaller bundle
 
 if len(sys.argv) == 3 and sys.argv[1] == "--self-test":
     # used by the CI build: check the bundle has everything, without opening a window
+    import ctypes
+    import glob
     import socket
 
-    from gi.repository import Gtk
-
     from phonemessages import app, spelling
+    from gi.repository import Gtk  # after app, which picks the GTK version
     speller = spelling.Speller.load(["en_US"])
+    enchant = []
+    for name in ("libenchant-2-2.dll", "libenchant-2.dll"):
+        try:
+            ctypes.CDLL(name)
+            enchant.append(name + " loads")
+        except OSError as e:
+            enchant.append("%s: %s" % (name, e))
+    here = getattr(sys, "_MEIPASS", os.path.dirname(sys.executable))
+    found = [os.path.relpath(f, here) for f in glob.glob(os.path.join(here, "**", "*enchant*"), recursive=True)
+             + glob.glob(os.path.join(here, "**", "en_US.*"), recursive=True)]
     try:  # build machines usually have no Bluetooth, so this is only reported
         socket.socket(getattr(socket, "AF_BLUETOOTH", 32), socket.SOCK_STREAM,
                       getattr(socket, "BTPROTO_RFCOMM", 3)).close()
@@ -27,6 +38,7 @@ if len(sys.argv) == 3 and sys.argv[1] == "--self-test":
         f.write("gtk %d.%d\n" % (Gtk.get_major_version(), Gtk.get_minor_version()))
         f.write("client %s\n" % app.MapClient.__module__)
         f.write("spelling %s\n" % (speller.language if speller else "missing"))
+        f.write("enchant %s\nfiles %s\n" % ("; ".join(enchant), ", ".join(found)))
         f.write("bluetooth sockets %s\n" % bluetooth)
     sys.exit(0)
 
