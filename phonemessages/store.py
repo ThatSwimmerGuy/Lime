@@ -8,6 +8,10 @@ import time
 
 MAX_PINS = 9  # as in Messages: three rows of three
 
+# whether phone text ? (given three times) is what Lime sent for a stored `text`: the same,
+# an edit ("*text") or a reply ('reply:"..."' then a newline and the text)
+SENT_AS = "(? = text OR ? = '*' || text OR substr(?, -length(text) - 1) = char(10) || text)"
+
 
 def conv_key(address):
     """Group "+1 (555) 123-4567" and "5551234567" into one conversation."""
@@ -63,6 +67,14 @@ class Store:
                 SELECT 1 FROM messages o WHERE o.id < messages.id AND o.handle IS NOT NULL
                 AND o.conv = messages.conv AND o.outgoing = messages.outgoing
                 AND o.text = messages.text AND abs(o.ts - messages.ts) < 300)""")
+        # and phone copies of our own sends, which older versions stored beside the original
+        self.db.execute("""
+            DELETE FROM messages WHERE handle IS NOT NULL AND outgoing = 1 AND EXISTS (
+                SELECT 1 FROM messages o WHERE o.handle IS NULL AND o.outgoing = 1
+                AND o.conv = messages.conv AND COALESCE(o.status, '') != 'failed'
+                AND abs(o.ts - messages.ts) < 300 AND (messages.text = o.text
+                OR messages.text = '*' || o.text
+                OR substr(messages.text, -length(o.text) - 1) = char(10) || o.text))""")
         self.db.commit()
 
     def has_handle(self, handle, ts):
@@ -86,6 +98,17 @@ class Store:
                                " AND handle IS NOT NULL AND abs(ts - ?) < 300",
                                (conv, int(outgoing), text, ts)).fetchone():
                 return None
+            # the phone lists what we sent in its sent folder; claim our own copy instead
+            if outgoing:
+                own = self.db.execute(
+                    "SELECT id FROM messages WHERE conv = ? AND outgoing = 1 AND handle IS NULL"
+                    " AND COALESCE(status, '') != 'failed' AND abs(ts - ?) < 300 AND " + SENT_AS +
+                    " ORDER BY ts LIMIT 1", (conv, ts, text, text, text)).fetchone()
+                if own:
+                    self.db.execute("UPDATE messages SET handle = ?, ts = ? WHERE id = ?",
+                                    (handle, ts, own["id"]))
+                    self.db.commit()
+                    return None
         try:
             cur = self.db.execute(
                 "INSERT INTO messages (conv, address, name, outgoing, text, ts, handle, status, dedupe,"

@@ -70,6 +70,38 @@ def test_our_own_sends_are_never_deduplicated(store):
     assert a is not None and b is not None and a != b
 
 
+@pytest.mark.parametrize("phone_text", ["ok", "*ok", 'reply:"Dinner?"\nok'])
+def test_phone_copy_of_our_send_is_not_stored_again(store, phone_text):
+    # the phone lists what Lime sent in its sent folder, a little later and by its own clock
+    own = store.add("5551234567", "ok", outgoing=True, ts=T, status="sent")
+    assert store.add("+1 555 123 4567", phone_text, outgoing=True, ts=T + 3, handle="h1") is None
+    assert [m["id"] for m in store.messages("5551234567")] == [own]
+    assert store.has_handle("h1", T + 3)  # so later polls skip it
+
+
+def test_phone_copy_does_not_claim_a_failed_send(store):
+    store.add("5551234567", "ok", outgoing=True, ts=T, status="failed")
+    assert store.add("5551234567", "ok", outgoing=True, ts=T + 3, handle="h1") is not None
+
+
+def test_message_sent_on_the_phone_itself_is_kept(store):
+    store.add("5551234567", "ok", outgoing=True, ts=T, status="sent")
+    assert store.add("5551234567", "something else", outgoing=True, ts=T + 3, handle="h1") is not None
+
+
+def test_opening_removes_phone_copies_of_our_sends(tmp_path):
+    path = str(tmp_path / "messages.db")
+    s = Store(path)
+    own = s.add("5551234567", "ok", outgoing=True, ts=T, status="sent")
+    s.db.execute("INSERT INTO messages (conv, address, outgoing, text, ts, handle)"
+                 " VALUES ('5551234567', '5551234567', 1, 'ok', ?, 'h1')", (T + 3,))
+    s.db.commit()
+    s.db.close()
+    s = Store(path)
+    assert [m["id"] for m in s.messages("5551234567")] == [own]
+    s.db.close()
+
+
 def test_add_keeps_reply_and_reaction_fields(store):
     target = store.add("5551234567", "Dinner?", outgoing=False, ts=T, handle="h1")
     react = store.add("5551234567", "Loved “Dinner?”", outgoing=True, ts=T + 5,
